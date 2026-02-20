@@ -57,6 +57,9 @@ Thumbs.db
 # eigen source
 thirdparty/eigen-*.*.*
 
+# ffmpeg lib
+thirdparty/ffmpeg_build_8_0_1
+
 # tex doc outputs
 docs/*.aux
 docs/*.log

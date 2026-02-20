@@ -2,6 +2,7 @@
 
 #include <QObject>
 #include <QString>
+#include <QMap>
 
 struct MediaInfo {
     QString filePath;
@@ -11,11 +12,21 @@ struct MediaInfo {
     int videoHeight = 0;
     double videoFps = 0.0;
     QString videoCodec;
+    int videoBitRate = 0;
+    QString videoPixelFormat;
     int audioSampleRate = 0;
     int audioChannels = 0;
     QString audioCodec;
+    int audioBitRate = 0;
     bool hasVideo = false;
     bool hasAudio = false;
+
+    // Metadata for FIT alignment
+    double creationTimestamp = 0.0;  // Unix timestamp from creation_time metadata
+    QString creationTimeStr;         // Raw creation_time string
+
+    // All metadata key-value pairs
+    QMap<QString, QString> metadata;
 };
 
 class MediaProbe : public QObject {

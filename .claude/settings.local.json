@@ -16,7 +16,8 @@
       "Bash(cmd //c build.bat)",
       "Bash(cmd //c \"cd /d D:\\\\work\\\\c_projs\\\\FitViber && build.bat\")",
       "Bash(./test_time_sync.exe)",
-      "Bash(./test_overlay_config.exe:*)"
+      "Bash(./test_overlay_config.exe:*)",
+      "Bash(ls:*)"
     ]
   }
 }

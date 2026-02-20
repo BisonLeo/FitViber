@@ -1,6 +1,9 @@
 @echo off
 setlocal
 
+REM Change to script directory (project root)
+cd /d "%~dp0"
+
 REM Setup MSVC environment (VS 2022)
 call "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Auxiliary\Build\vcvars64.bat"
 

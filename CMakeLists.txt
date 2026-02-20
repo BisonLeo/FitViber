@@ -40,8 +40,8 @@ endif()
 # or build it from thirdparty/ffmpeg and install to thirdparty/ffmpeg-build.
 if(NOT DEFINED FFMPEG_ROOT)
     # Check common locations
-    if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/thirdparty/ffmpeg-build)
-        set(FFMPEG_ROOT ${CMAKE_CURRENT_SOURCE_DIR}/thirdparty/ffmpeg-build)
+    if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/thirdparty/ffmpeg_build_8_0_1)
+        set(FFMPEG_ROOT ${CMAKE_CURRENT_SOURCE_DIR}/thirdparty/ffmpeg_build_8_0_1)
     elseif(DEFINED ENV{FFMPEG_ROOT})
         set(FFMPEG_ROOT $ENV{FFMPEG_ROOT})
     endif()
@@ -238,6 +238,10 @@ set(TEST_HELPER_SOURCES
     src/fit/FitTrack.cpp
     src/overlay/OverlayPanel.cpp
     src/overlay/OverlayConfig.cpp
+    src/media/MediaProbe.cpp
+    src/media/VideoDecoder.cpp
+    src/media/AudioDecoder.cpp
+    src/media/ImageUtil.cpp
 )
 
 file(GLOB TEST_SOURCES "test/test_*.cpp")
@@ -250,12 +254,18 @@ foreach(TEST_SOURCE ${TEST_SOURCES})
         ${CMAKE_CURRENT_SOURCE_DIR}/src
         ${CMAKE_CURRENT_SOURCE_DIR}/src/app
         ${CMAKE_CURRENT_SOURCE_DIR}/src/fit
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/media
         ${CMAKE_CURRENT_SOURCE_DIR}/src/overlay
         ${CMAKE_CURRENT_SOURCE_DIR}/src/util
     )
     if(HAS_FIT_SDK)
         target_link_libraries(${TEST_NAME} fit_sdk)
         target_compile_definitions(${TEST_NAME} PRIVATE HAS_FIT_SDK)
+    endif()
+    if(HAS_FFMPEG)
+        target_link_libraries(${TEST_NAME} ${FFMPEG_LIBRARIES})
+        target_compile_definitions(${TEST_NAME} PRIVATE HAS_FFMPEG)
+        target_include_directories(${TEST_NAME} PRIVATE ${FFMPEG_INCLUDE_DIR})
     endif()
 
     # Copy test executables to bin/ so they can find Qt DLLs

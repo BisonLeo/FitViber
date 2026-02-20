@@ -3,6 +3,7 @@
 #include <QObject>
 #include <QImage>
 #include <QString>
+#include <memory>
 
 struct VideoInfo {
     int width = 0;
