@@ -1,6 +1,7 @@
 #include "ElevationPanel.h"
 
 ElevationPanel::ElevationPanel(QObject* parent) : OverlayPanel(PanelType::Elevation, parent) {
+    m_config.label = defaultLabel();
     m_config.x = 0.66;
     m_config.y = 0.85;
     m_config.textColor = QColor(100, 220, 100);

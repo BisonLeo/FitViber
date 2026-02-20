@@ -23,41 +23,55 @@ find_package(Qt6 REQUIRED COMPONENTS
     Multimedia
 )
 
-# FIT SDK (user provides sources in thirdparty/fit-sdk/cpp/)
-set(FIT_SDK_DIR ${CMAKE_CURRENT_SOURCE_DIR}/thirdparty/fit-sdk)
+# FIT C++ SDK (git submodule in thirdparty/fit-cpp-sdk)
+set(FIT_SDK_DIR ${CMAKE_CURRENT_SOURCE_DIR}/thirdparty/fit-cpp-sdk)
 if(EXISTS ${FIT_SDK_DIR}/CMakeLists.txt)
     add_subdirectory(${FIT_SDK_DIR})
     set(HAS_FIT_SDK TRUE)
+    message(STATUS "Found FIT C++ SDK in thirdparty/fit-cpp-sdk/")
 else()
-    message(WARNING "FIT SDK not found in thirdparty/fit-sdk/ - FIT parsing will use stub")
+    message(WARNING "FIT SDK not found - FIT parsing will use stub")
     set(HAS_FIT_SDK FALSE)
 endif()
 
-# FFmpeg imported libraries
-set(FFMPEG_DIR ${CMAKE_CURRENT_SOURCE_DIR}/thirdparty/ffmpeg)
-set(FFMPEG_INCLUDE_DIR ${FFMPEG_DIR}/include)
-set(FFMPEG_LIB_DIR ${FFMPEG_DIR}/lib)
-set(FFMPEG_BIN_DIR ${FFMPEG_DIR}/bin)
+# FFmpeg pre-built libraries
+# FFmpeg source is in thirdparty/ffmpeg (git submodule) but must be built
+# separately. Set FFMPEG_ROOT to point to a pre-built FFmpeg installation,
+# or build it from thirdparty/ffmpeg and install to thirdparty/ffmpeg-build.
+if(NOT DEFINED FFMPEG_ROOT)
+    # Check common locations
+    if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/thirdparty/ffmpeg-build)
+        set(FFMPEG_ROOT ${CMAKE_CURRENT_SOURCE_DIR}/thirdparty/ffmpeg-build)
+    elseif(DEFINED ENV{FFMPEG_ROOT})
+        set(FFMPEG_ROOT $ENV{FFMPEG_ROOT})
+    endif()
+endif()
 
 set(FFMPEG_LIBRARIES "")
 set(HAS_FFMPEG FALSE)
 
-foreach(LIB avcodec avformat avutil swscale swresample)
-    find_library(FFMPEG_${LIB}_LIBRARY
-        NAMES ${LIB}
-        PATHS ${FFMPEG_LIB_DIR}
-        NO_DEFAULT_PATH
-    )
-    if(FFMPEG_${LIB}_LIBRARY)
-        list(APPEND FFMPEG_LIBRARIES ${FFMPEG_${LIB}_LIBRARY})
-        set(HAS_FFMPEG TRUE)
-    endif()
-endforeach()
+if(DEFINED FFMPEG_ROOT)
+    set(FFMPEG_INCLUDE_DIR ${FFMPEG_ROOT}/include)
+    set(FFMPEG_LIB_DIR ${FFMPEG_ROOT}/lib)
+    set(FFMPEG_BIN_DIR ${FFMPEG_ROOT}/bin)
+
+    foreach(LIB avcodec avformat avutil swscale swresample)
+        find_library(FFMPEG_${LIB}_LIBRARY
+            NAMES ${LIB}
+            PATHS ${FFMPEG_LIB_DIR}
+            NO_DEFAULT_PATH
+        )
+        if(FFMPEG_${LIB}_LIBRARY)
+            list(APPEND FFMPEG_LIBRARIES ${FFMPEG_${LIB}_LIBRARY})
+            set(HAS_FFMPEG TRUE)
+        endif()
+    endforeach()
+endif()
 
 if(HAS_FFMPEG)
     message(STATUS "Found FFmpeg libraries: ${FFMPEG_LIBRARIES}")
 else()
-    message(WARNING "FFmpeg libraries not found in thirdparty/ffmpeg/lib/ - video features will use stubs")
+    message(WARNING "FFmpeg not found - set FFMPEG_ROOT or build thirdparty/ffmpeg to thirdparty/ffmpeg-build. Video features will use stubs.")
 endif()
 
 # Include directories
@@ -73,7 +87,7 @@ include_directories(
     ${CMAKE_CURRENT_SOURCE_DIR}/src/util
 )
 
-if(HAS_FFMPEG)
+if(HAS_FFMPEG AND DEFINED FFMPEG_INCLUDE_DIR)
     include_directories(${FFMPEG_INCLUDE_DIR})
 endif()
 
@@ -218,19 +232,37 @@ install(TARGETS ${PROJECT_NAME}
 # Test Targets
 # =============================================================================
 
+# Common test helper sources needed by tests
+set(TEST_HELPER_SOURCES
+    src/fit/FitParser.cpp
+    src/fit/FitTrack.cpp
+    src/overlay/OverlayPanel.cpp
+    src/overlay/OverlayConfig.cpp
+)
+
 file(GLOB TEST_SOURCES "test/test_*.cpp")
 
 foreach(TEST_SOURCE ${TEST_SOURCES})
     get_filename_component(TEST_NAME ${TEST_SOURCE} NAME_WE)
-    add_executable(${TEST_NAME} ${TEST_SOURCE})
-    target_link_libraries(${TEST_NAME} Qt6::Core)
+    add_executable(${TEST_NAME} ${TEST_SOURCE} ${TEST_HELPER_SOURCES})
+    target_link_libraries(${TEST_NAME} Qt6::Core Qt6::Gui Qt6::Widgets)
     target_include_directories(${TEST_NAME} PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/src
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/app
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/fit
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/overlay
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/util
     )
     if(HAS_FIT_SDK)
         target_link_libraries(${TEST_NAME} fit_sdk)
         target_compile_definitions(${TEST_NAME} PRIVATE HAS_FIT_SDK)
     endif()
+
+    # Copy test executables to bin/ so they can find Qt DLLs
+    add_custom_command(TARGET ${TEST_NAME} POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            $<TARGET_FILE:${TEST_NAME}> ${CMAKE_CURRENT_LIST_DIR}/bin/
+    )
 endforeach()
 
 list(LENGTH TEST_SOURCES TEST_COUNT)

@@ -1,6 +1,7 @@
 #include "LapPanel.h"
 
 LapPanel::LapPanel(QObject* parent) : OverlayPanel(PanelType::Lap, parent) {
+    m_config.label = defaultLabel();
     m_config.x = 0.02;
     m_config.y = 0.02;
 }

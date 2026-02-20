@@ -4,7 +4,7 @@ OverlayPanel::OverlayPanel(PanelType type, QObject* parent)
     : QObject(parent)
 {
     m_config.type = type;
-    m_config.label = defaultLabel();
+    // Note: label is set by each subclass constructor after calling base
 }
 
 OverlayPanel::~OverlayPanel() = default;

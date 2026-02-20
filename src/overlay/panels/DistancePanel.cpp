@@ -1,6 +1,7 @@
 #include "DistancePanel.h"
 
 DistancePanel::DistancePanel(QObject* parent) : OverlayPanel(PanelType::Distance, parent) {
+    m_config.label = defaultLabel();
     m_config.x = 0.82;
     m_config.y = 0.85;
 }

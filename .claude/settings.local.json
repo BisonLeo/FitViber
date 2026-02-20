@@ -1,0 +1,22 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(build.bat)",
+      "Bash(gcc:*)",
+      "Bash(where:*)",
+      "Bash(where gcc:*)",
+      "Bash(cmake:*)",
+      "Bash(cmake --build:*)",
+      "Bash(powershell -Command:*)",
+      "Bash(dir:*)",
+      "Bash(git submodule add:*)",
+      "Bash(git add:*)",
+      "Bash(cmd //c \"D:\\\\work\\\\c_projs\\\\FitViber\\\\build.bat\")",
+      "Bash(./test_fit_parser.exe:*)",
+      "Bash(cmd //c build.bat)",
+      "Bash(cmd //c \"cd /d D:\\\\work\\\\c_projs\\\\FitViber && build.bat\")",
+      "Bash(./test_time_sync.exe)",
+      "Bash(./test_overlay_config.exe:*)"
+    ]
+  }
+}

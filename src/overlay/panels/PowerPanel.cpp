@@ -1,6 +1,7 @@
 #include "PowerPanel.h"
 
 PowerPanel::PowerPanel(QObject* parent) : OverlayPanel(PanelType::Power, parent) {
+    m_config.label = defaultLabel();
     m_config.x = 0.50;
     m_config.y = 0.85;
     m_config.textColor = QColor(255, 200, 50);

@@ -1,0 +1,71 @@
+# Build directories
+build/
+cmake-build-*/
+
+# Qt-specific
+*.pro.user
+*.autosave
+*.qmlc
+*.jsc
+moc_*.cpp
+moc_*.h
+qrc_*.cpp
+ui_*.h
+*.qm
+
+# CMake
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+Makefile
+
+# Compiled Object files
+*.slo
+*.lo
+*.o
+*.obj
+
+# Precompiled Headers
+*.gch
+*.pch
+
+# Compiled Dynamic libraries
+*.so
+*.dylib
+*.dll
+
+# Compiled Static libraries
+*.lai
+*.la
+*.a
+*.lib
+
+# Executables
+*.exe
+*.out
+*.app
+
+# IDE specific
+.vscode/
+.idea/
+*.cbp
+
+# OS specific
+.DS_Store
+Thumbs.db
+
+# eigen source
+thirdparty/eigen-*.*.*
+
+# tex doc outputs
+docs/*.aux
+docs/*.log
+docs/*.out
+docs/*.gz
+docs/*.toc
+docs/*.pdf
+**/*.asv
+
+testdata/*.csv
+testdata/*.mat
+testdata/*.fit

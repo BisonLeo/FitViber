@@ -2,6 +2,7 @@
 #include <QPainterPath>
 
 MiniMapPanel::MiniMapPanel(QObject* parent) : OverlayPanel(PanelType::MiniMap, parent) {
+    m_config.label = defaultLabel();
     m_config.x = 0.80;
     m_config.y = 0.02;
     m_config.width = 0.18;

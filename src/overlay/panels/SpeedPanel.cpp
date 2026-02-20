@@ -1,6 +1,7 @@
 #include "SpeedPanel.h"
 
 SpeedPanel::SpeedPanel(QObject* parent) : OverlayPanel(PanelType::Speed, parent) {
+    m_config.label = defaultLabel();
     m_config.x = 0.02;
     m_config.y = 0.85;
 }

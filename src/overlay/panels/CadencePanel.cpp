@@ -1,6 +1,7 @@
 #include "CadencePanel.h"
 
 CadencePanel::CadencePanel(QObject* parent) : OverlayPanel(PanelType::Cadence, parent) {
+    m_config.label = defaultLabel();
     m_config.x = 0.34;
     m_config.y = 0.85;
     m_config.textColor = QColor(80, 200, 255);
