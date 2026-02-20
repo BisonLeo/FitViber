@@ -24,6 +24,10 @@ TimelineWidget::TimelineWidget(QWidget* parent)
     setMouseTracking(true);
     setFocusPolicy(Qt::StrongFocus);
     setAcceptDrops(true);
+
+    connect(m_model.get(), &TimelineModel::playheadChanged, this, [this](double) {
+        update();
+    });
 }
 
 TimelineWidget::~TimelineWidget() = default;

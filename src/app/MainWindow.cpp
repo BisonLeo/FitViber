@@ -197,6 +197,9 @@ void MainWindow::onMediaSelected(const QString& path) {
     m_playbackController->stop();
     m_playbackEngine->close();
 
+    m_playbackFromTimeline = false;
+    m_currentClipPath = path;
+
     if (!m_playbackEngine->open(path)) {
         statusBar()->showMessage(QString("Failed to open video: %1").arg(info.fileName()));
         return;
@@ -237,6 +240,11 @@ void MainWindow::onPlaybackTick(double /*currentTime*/) {
         m_previewWidget->displayFrame(frame.image);
         m_lastFramePts = frame.pts;
         m_previewWidget->setCurrentTime(frame.pts);
+
+        if (m_playbackFromTimeline) {
+            double timelineTime = frame.pts + m_currentClipTimeBase;
+            m_timelineWidget->model()->setPlayheadPosition(timelineTime);
+        }
     } else if (m_playbackEngine->isFinished()) {
         // All frames consumed and decoder hit EOF — stop playback.
         // Use the last frame PTS as the true video duration.
@@ -275,6 +283,9 @@ void MainWindow::onTimelineScrub(double relativeSeconds) {
 
                 // Video clip: calculate source time within clip
                 double sourceTime = relativeSeconds - clipStart + clip.sourceIn;
+
+                m_playbackFromTimeline = true;
+                m_currentClipTimeBase = clipStart - clip.sourceIn;
 
                 // Only re-open if different file
                 if (clip.sourcePath != m_currentClipPath) {
