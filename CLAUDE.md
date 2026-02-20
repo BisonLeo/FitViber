@@ -13,6 +13,11 @@ FitViber is a Qt6/C++17 desktop application for creating GPS activity overlay vi
 build.bat
 ```
 
+**CI/non-interactive build from bash** (same as build.bat but no `pause`, works in MINGW64/Git Bash):
+```
+"D:/work/c_projs/FitViber/build_ci.bat" 2>&1
+```
+
 **Manual build from bash** (requires MSVC and Qt in PATH):
 ```
 cd build && cmake -G "Ninja" -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH=D:/Qt/6.10.1/msvc2022_64 .. && ninja

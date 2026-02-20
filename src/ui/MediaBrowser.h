@@ -5,6 +5,15 @@
 #include <QPushButton>
 #include <QVBoxLayout>
 #include <QStringList>
+#include <memory>
+
+class VideoDecoder;
+
+enum class MediaType {
+    Video,
+    Image,
+    FIT
+};
 
 class MediaBrowser : public QWidget {
     Q_OBJECT
@@ -13,15 +22,34 @@ public:
     ~MediaBrowser();
 
 signals:
-    void videoFileSelected(const QString& path);
+    void mediaSelected(const QString& path);
     void fitFileSelected(const QString& path);
+
+protected:
+    bool eventFilter(QObject* obj, QEvent* event) override;
 
 private slots:
     void onImportClicked();
-    void onItemDoubleClicked(QListWidgetItem* item);
+    void onItemClicked(QListWidgetItem* item);
 
 private:
+    static constexpr int ThumbWidth = 160;
+    static constexpr int ThumbHeight = 120;
+    static constexpr int UserRolePath = Qt::UserRole;
+    static constexpr int UserRoleType = Qt::UserRole + 1;
+    static constexpr int UserRoleDuration = Qt::UserRole + 2;
+
+    QPixmap generateVideoThumbnail(const QString& path);
+    QPixmap generateImageThumbnail(const QString& path);
+    QPixmap generateFitThumbnail(const QString& path);
+    MediaType classifyFile(const QString& suffix) const;
+
     QListWidget* m_listWidget;
     QPushButton* m_importButton;
     QStringList m_mediaPaths;
+
+    // Hover scrub state
+    std::unique_ptr<VideoDecoder> m_scrubDecoder;
+    QListWidgetItem* m_hoveredItem = nullptr;
+    QIcon m_hoveredOriginalIcon;
 };

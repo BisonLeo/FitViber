@@ -98,6 +98,7 @@ set(SOURCES
     src/fit/FitParser.cpp
     src/fit/FitTrack.cpp
     src/media/VideoDecoder.cpp
+    src/media/VideoPlaybackEngine.cpp
     src/media/AudioDecoder.cpp
     src/media/MediaProbe.cpp
     src/media/MediaExporter.cpp
@@ -132,6 +133,7 @@ set(HEADERS
     src/fit/FitData.h
     src/fit/FitTrack.h
     src/media/VideoDecoder.h
+    src/media/VideoPlaybackEngine.h
     src/media/AudioDecoder.h
     src/media/MediaProbe.h
     src/media/FrameQueue.h

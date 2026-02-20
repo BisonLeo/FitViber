@@ -12,7 +12,7 @@ class PlaybackController;
 class OverlayRenderer;
 class FitTrack;
 class TimeSync;
-class VideoDecoder;
+class VideoPlaybackEngine;
 
 class MainWindow : public QMainWindow {
     Q_OBJECT
@@ -21,9 +21,10 @@ public:
     ~MainWindow();
 
 private slots:
-    void onVideoFileOpened(const QString& path);
+    void onMediaSelected(const QString& path);
     void onFitFileOpened(const QString& path);
     void onExportRequested();
+    void onPlaybackTick(double currentTime);
 
 private:
     void setupUi();
@@ -44,5 +45,6 @@ private:
     std::unique_ptr<OverlayRenderer> m_overlayRenderer;
     std::unique_ptr<FitTrack> m_fitTrack;
     std::unique_ptr<TimeSync> m_timeSync;
-    std::unique_ptr<VideoDecoder> m_videoDecoder;
+    std::unique_ptr<VideoPlaybackEngine> m_playbackEngine;
+    double m_lastFramePts = 0.0;  // tracks actual video duration from decoded PTS
 };

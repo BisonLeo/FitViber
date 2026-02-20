@@ -18,6 +18,8 @@ struct VideoDecoder::FFmpegContext {
     int videoStreamIdx = -1;
     double timeBase = 0.0;
     uint8_t* rgbBuffer = nullptr;
+    bool eofReached = false;   // av_read_frame returned EOF
+    bool flushed = false;      // flush packet sent to codec
 
     ~FFmpegContext() {
         if (rgbBuffer) av_free(rgbBuffer);
@@ -95,9 +97,12 @@ bool VideoDecoder::open(const QString& filePath) {
     else if (stream->r_frame_rate.den > 0 && stream->r_frame_rate.num > 0)
         m_info.fps = av_q2d(stream->r_frame_rate);
 
-    m_info.duration = (m_ctx->fmtCtx->duration > 0)
-        ? static_cast<double>(m_ctx->fmtCtx->duration) / AV_TIME_BASE
-        : 0.0;
+    // Prefer video stream duration over container duration
+    if (stream->duration != AV_NOPTS_VALUE && stream->duration > 0) {
+        m_info.duration = static_cast<double>(stream->duration) * m_ctx->timeBase;
+    } else if (m_ctx->fmtCtx->duration > 0) {
+        m_info.duration = static_cast<double>(m_ctx->fmtCtx->duration) / AV_TIME_BASE;
+    }
 
     if (m_info.fps > 0 && m_info.duration > 0)
         m_info.totalFrames = static_cast<int64_t>(m_info.duration * m_info.fps);
@@ -149,42 +154,67 @@ QImage VideoDecoder::decodeNextFrame() {
 #ifdef HAS_FFMPEG
     if (!m_isOpen || !m_ctx) return QImage();
 
-    while (av_read_frame(m_ctx->fmtCtx, m_ctx->packet) >= 0) {
+    while (true) {
+        // Try to receive a frame from the codec first (handles buffered B-frames)
+        int ret = avcodec_receive_frame(m_ctx->codecCtx, m_ctx->frame);
+        if (ret == 0) {
+            // Got a frame — convert and return
+            sws_scale(m_ctx->swsCtx,
+                      m_ctx->frame->data, m_ctx->frame->linesize,
+                      0, m_info.height,
+                      m_ctx->rgbFrame->data, m_ctx->rgbFrame->linesize);
+
+            double pts = 0.0;
+            if (m_ctx->frame->pts != AV_NOPTS_VALUE) {
+                pts = static_cast<double>(m_ctx->frame->pts) * m_ctx->timeBase;
+            }
+            m_currentTime = pts;
+
+            QImage img(m_ctx->rgbFrame->data[0],
+                       m_info.width, m_info.height,
+                       m_ctx->rgbFrame->linesize[0],
+                       QImage::Format_RGB32);
+            QImage result = img.copy();
+
+            emit frameDecoded(result, pts);
+            return result;
+        }
+
+        if (ret != AVERROR(EAGAIN)) {
+            // AVERROR_EOF or real error — no more frames
+            return QImage();
+        }
+
+        // Codec needs more input
+        if (m_ctx->eofReached) {
+            if (!m_ctx->flushed) {
+                // Send flush packet to drain remaining buffered frames
+                m_ctx->flushed = true;
+                avcodec_send_packet(m_ctx->codecCtx, nullptr);
+                continue;  // Loop back to receive_frame
+            }
+            // Already flushed and no more frames
+            return QImage();
+        }
+
+        // Read next packet from file
+        ret = av_read_frame(m_ctx->fmtCtx, m_ctx->packet);
+        if (ret < 0) {
+            // EOF or read error — start draining codec
+            m_ctx->eofReached = true;
+            m_ctx->flushed = true;
+            avcodec_send_packet(m_ctx->codecCtx, nullptr);
+            continue;  // Loop back to receive_frame to get buffered frames
+        }
+
         if (m_ctx->packet->stream_index != m_ctx->videoStreamIdx) {
             av_packet_unref(m_ctx->packet);
             continue;
         }
 
-        int ret = avcodec_send_packet(m_ctx->codecCtx, m_ctx->packet);
+        avcodec_send_packet(m_ctx->codecCtx, m_ctx->packet);
         av_packet_unref(m_ctx->packet);
-        if (ret < 0) continue;
-
-        ret = avcodec_receive_frame(m_ctx->codecCtx, m_ctx->frame);
-        if (ret == AVERROR(EAGAIN)) continue;
-        if (ret < 0) return QImage();
-
-        // Convert to RGB
-        sws_scale(m_ctx->swsCtx,
-                  m_ctx->frame->data, m_ctx->frame->linesize,
-                  0, m_info.height,
-                  m_ctx->rgbFrame->data, m_ctx->rgbFrame->linesize);
-
-        // Calculate PTS
-        double pts = 0.0;
-        if (m_ctx->frame->pts != AV_NOPTS_VALUE) {
-            pts = static_cast<double>(m_ctx->frame->pts) * m_ctx->timeBase;
-        }
-        m_currentTime = pts;
-
-        // Create QImage (copy data so it owns the memory)
-        QImage img(m_ctx->rgbFrame->data[0],
-                   m_info.width, m_info.height,
-                   m_ctx->rgbFrame->linesize[0],
-                   QImage::Format_RGB32);
-        QImage result = img.copy();
-
-        emit frameDecoded(result, pts);
-        return result;
+        // Loop back to receive_frame
     }
 #endif
     return QImage();
@@ -199,6 +229,8 @@ bool VideoDecoder::seek(double seconds) {
     if (ret < 0) return false;
 
     avcodec_flush_buffers(m_ctx->codecCtx);
+    m_ctx->eofReached = false;
+    m_ctx->flushed = false;
     m_currentTime = seconds;
     return true;
 #else

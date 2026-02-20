@@ -16,14 +16,23 @@ public:
     void setDuration(double seconds);
     void setCurrentTime(double seconds);
 
+    void showImage(const QImage& image);
+    void showVideo();
+    void setPlayingState(bool playing);
+
 signals:
     void playPauseClicked();
     void seekRequested(double seconds);
     void stepForward();
     void stepBackward();
+    void videoAreaClicked();
+
+protected:
+    bool eventFilter(QObject* obj, QEvent* event) override;
 
 private:
     QLabel* m_frameLabel;
+    QWidget* m_controlsBar;
     QSlider* m_seekSlider;
     QPushButton* m_playButton;
     QPushButton* m_stepBackButton;
@@ -32,4 +41,5 @@ private:
 
     double m_duration = 0.0;
     QImage m_currentFrame;
+    bool m_videoMode = false;
 };
