@@ -1,0 +1,6 @@
+[submodule "thirdparty/fit-cpp-sdk"]
+	path = thirdparty/fit-cpp-sdk
+	url = https://github.com/garmin/fit-cpp-sdk.git
+[submodule "thirdparty/ffmpeg"]
+	path = thirdparty/ffmpeg
+	url = https://git.ffmpeg.org/ffmpeg.git
