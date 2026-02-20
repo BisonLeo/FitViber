@@ -27,6 +27,7 @@ public:
     Clip& clip(int index) { return m_clips[index]; }
     const Clip& clip(int index) const { return m_clips[index]; }
     const std::vector<Clip>& clips() const { return m_clips; }
+    std::vector<Clip>& clips() { return m_clips; }
 
     double duration() const;
     bool isMuted() const { return m_muted; }

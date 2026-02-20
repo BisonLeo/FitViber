@@ -4,6 +4,9 @@
 #include "PreviewWidget.h"
 #include "PropertiesPanel.h"
 #include "TimelineWidget.h"
+#include "TimelineModel.h"
+#include "Track.h"
+#include "Clip.h"
 #include "PlaybackController.h"
 #include "OverlayRenderer.h"
 #include "FitTrack.h"
@@ -161,6 +164,12 @@ void MainWindow::connectSignals() {
             m_playbackEngine->seek(seconds);
         }
     });
+
+    // Timeline seek/scrub → find clip and display frame
+    connect(m_timelineWidget, &TimelineWidget::seekRequested,
+            this, &MainWindow::onTimelineSeek);
+    connect(m_timelineWidget, &TimelineWidget::playheadScrubbed,
+            this, &MainWindow::onTimelineScrub);
 }
 
 void MainWindow::onMediaSelected(const QString& path) {
@@ -236,6 +245,65 @@ void MainWindow::onPlaybackTick(double /*currentTime*/) {
         m_previewWidget->setCurrentTime(m_lastFramePts);
     }
     // When no frame is ready but not EOF, keep the last displayed time.
+}
+
+void MainWindow::onTimelineSeek(double relativeSeconds) {
+    onTimelineScrub(relativeSeconds);
+}
+
+void MainWindow::onTimelineScrub(double relativeSeconds) {
+    // Find which clip is at this time position
+    auto* model = m_timelineWidget->model();
+
+    for (int ti = 0; ti < model->trackCount(); ++ti) {
+        Track* track = model->track(ti);
+        if (!track) continue;
+        for (const auto& clip : track->clips()) {
+            double clipStart = clip.timelineOffset;
+            double clipEnd = clipStart + clip.duration();
+            if (relativeSeconds >= clipStart && relativeSeconds < clipEnd) {
+                if (clip.type == ClipType::Image) {
+                    // Load and display image
+                    QImage img(clip.sourcePath);
+                    if (!img.isNull()) {
+                        m_playbackController->stop();
+                        m_previewWidget->showImage(img);
+                        m_currentClipPath = clip.sourcePath;
+                    }
+                    return;
+                }
+
+                // Video clip: calculate source time within clip
+                double sourceTime = relativeSeconds - clipStart + clip.sourceIn;
+
+                // Only re-open if different file
+                if (clip.sourcePath != m_currentClipPath) {
+                    m_playbackController->stop();
+                    m_playbackEngine->close();
+
+                    if (!m_playbackEngine->open(clip.sourcePath)) return;
+                    m_currentClipPath = clip.sourcePath;
+                    m_previewWidget->showVideo();
+
+                    const auto& vi = m_playbackEngine->info();
+                    m_playbackController->setFps(vi.fps > 0 ? vi.fps : 30.0);
+                    m_playbackController->setDuration(vi.duration > 0 ? vi.duration : 3600.0);
+                    m_previewWidget->setDuration(vi.duration);
+                }
+
+                // Seek to the position within the clip
+                m_playbackEngine->seek(sourceTime);
+                QThread::msleep(30);
+                TimedFrame frame = m_playbackEngine->nextFrame();
+                if (!frame.image.isNull()) {
+                    m_previewWidget->displayFrame(frame.image);
+                    m_previewWidget->setCurrentTime(sourceTime);
+                    m_lastFramePts = frame.pts;
+                }
+                return;
+            }
+        }
+    }
 }
 
 void MainWindow::onFitFileOpened(const QString& path) {

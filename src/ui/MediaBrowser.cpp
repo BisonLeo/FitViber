@@ -4,6 +4,25 @@
 #include <QFileInfo>
 #include <QMouseEvent>
 #include <QPainter>
+#include <QMimeData>
+#include <QDrag>
+#include <QUrl>
+
+void MediaBrowserListWidget::startDrag(Qt::DropActions /*supportedActions*/) {
+    QListWidgetItem* item = currentItem();
+    if (!item) return;
+
+    QString path = item->data(Qt::UserRole).toString();
+    if (path.isEmpty()) return;
+
+    auto* mimeData = new QMimeData();
+    mimeData->setUrls({QUrl::fromLocalFile(path)});
+
+    auto* drag = new QDrag(this);
+    drag->setMimeData(mimeData);
+    drag->setPixmap(item->icon().pixmap(64, 48));
+    drag->exec(Qt::CopyAction);
+}
 
 MediaBrowser::MediaBrowser(QWidget* parent) : QWidget(parent) {
     auto* layout = new QVBoxLayout(this);
@@ -12,7 +31,7 @@ MediaBrowser::MediaBrowser(QWidget* parent) : QWidget(parent) {
     m_importButton = new QPushButton("Import Media...", this);
     layout->addWidget(m_importButton);
 
-    m_listWidget = new QListWidget(this);
+    m_listWidget = new MediaBrowserListWidget(this);
     m_listWidget->setViewMode(QListWidget::IconMode);
     m_listWidget->setIconSize(QSize(ThumbWidth, ThumbHeight));
     m_listWidget->setGridSize(QSize(ThumbWidth + 20, ThumbHeight + 40));
@@ -20,6 +39,8 @@ MediaBrowser::MediaBrowser(QWidget* parent) : QWidget(parent) {
     m_listWidget->setWrapping(true);
     m_listWidget->setSpacing(8);
     m_listWidget->setMovement(QListWidget::Static);
+    m_listWidget->setDragEnabled(true);
+    m_listWidget->setDragDropMode(QAbstractItemView::DragOnly);
     m_listWidget->viewport()->setMouseTracking(true);
     m_listWidget->viewport()->installEventFilter(this);
     layout->addWidget(m_listWidget);

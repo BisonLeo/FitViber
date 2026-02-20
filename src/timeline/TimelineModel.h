@@ -25,6 +25,11 @@ public:
     double scrollOffset() const { return m_scrollOffset; }
     void setScrollOffset(double offset);
 
+    double timeOrigin() const { return m_timeOrigin; }
+    void setTimeOrigin(double unixTimestamp);
+    double absoluteToRelative(double absTime) const { return absTime - m_timeOrigin; }
+    double relativeToAbsolute(double relTime) const { return relTime + m_timeOrigin; }
+
 signals:
     void playheadChanged(double seconds);
     void trackAdded(int index);
@@ -37,4 +42,5 @@ private:
     double m_playhead = 0.0;
     double m_zoom = 1.0;         // pixels per second
     double m_scrollOffset = 0.0; // horizontal scroll in seconds
+    double m_timeOrigin = 0.0;   // Unix timestamp of timeline zero
 };

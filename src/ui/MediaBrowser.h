@@ -15,6 +15,14 @@ enum class MediaType {
     FIT
 };
 
+class MediaBrowserListWidget : public QListWidget {
+    Q_OBJECT
+public:
+    using QListWidget::QListWidget;
+protected:
+    void startDrag(Qt::DropActions supportedActions) override;
+};
+
 class MediaBrowser : public QWidget {
     Q_OBJECT
 public:
@@ -44,7 +52,7 @@ private:
     QPixmap generateFitThumbnail(const QString& path);
     MediaType classifyFile(const QString& suffix) const;
 
-    QListWidget* m_listWidget;
+    MediaBrowserListWidget* m_listWidget;
     QPushButton* m_importButton;
     QStringList m_mediaPaths;
 

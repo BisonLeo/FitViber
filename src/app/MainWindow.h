@@ -25,6 +25,8 @@ private slots:
     void onFitFileOpened(const QString& path);
     void onExportRequested();
     void onPlaybackTick(double currentTime);
+    void onTimelineSeek(double relativeSeconds);
+    void onTimelineScrub(double relativeSeconds);
 
 private:
     void setupUi();
@@ -47,4 +49,5 @@ private:
     std::unique_ptr<TimeSync> m_timeSync;
     std::unique_ptr<VideoPlaybackEngine> m_playbackEngine;
     double m_lastFramePts = 0.0;  // tracks actual video duration from decoded PTS
+    QString m_currentClipPath;    // path of currently loaded clip in playback engine
 };
