@@ -52,4 +52,6 @@ private:
     QString m_currentClipPath;    // path of currently loaded clip in playback engine
     double m_currentClipTimeBase = 0.0; // timeline start time minus source start time
     bool m_playbackFromTimeline = false; // true if playback was initiated from timeline
+    bool m_forceTimelineSeek = false; // flag to trigger seek when playing from timeline
+    double m_lastSourceTime = -1.0; // previous tick's source time
 };

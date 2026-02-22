@@ -160,8 +160,10 @@ void MainWindow::connectSignals() {
 
     // Any seek/step performed by PlaybackController → sync the decode engine
     connect(m_playbackController, &PlaybackController::seekPerformed, this, [this](double seconds) {
-        if (m_playbackEngine->isOpen()) {
-            m_playbackEngine->seek(seconds);
+        if (!m_playbackFromTimeline) {
+            if (m_playbackEngine->isOpen()) m_playbackEngine->seek(seconds);
+        } else {
+            m_forceTimelineSeek = true;
         }
     });
 
@@ -231,28 +233,139 @@ void MainWindow::onMediaSelected(const QString& path) {
         .arg(vi.duration, 0, 'f', 1));
 }
 
-void MainWindow::onPlaybackTick(double /*currentTime*/) {
-    if (!m_playbackEngine->isOpen()) return;
+void MainWindow::onPlaybackTick(double currentTime) {
+    if (!m_playbackFromTimeline) {
+        if (!m_playbackEngine->isOpen()) return;
 
-    // Pull pre-decoded frame from queue (no seeking — sequential decode)
+        TimedFrame frame = m_playbackEngine->nextFrame();
+        if (!frame.image.isNull()) {
+            m_previewWidget->displayFrame(frame.image);
+            m_lastFramePts = frame.pts;
+            m_previewWidget->setCurrentTime(frame.pts);
+        } else if (m_playbackEngine->isFinished()) {
+            m_playbackController->pause();
+            m_previewWidget->setDuration(m_lastFramePts);
+            m_previewWidget->setCurrentTime(m_lastFramePts);
+        }
+        return;
+    }
+
+    // --- TIMELINE PREVIEW MODE ---
+    m_timelineWidget->model()->setPlayheadPosition(currentTime);
+    
+    double dur = m_timelineWidget->model()->duration();
+    if (dur > 0) {
+        m_playbackController->setDuration(dur);
+        m_previewWidget->setDuration(dur);
+    }
+
+    // Find clip at currentTime
+    auto* model = m_timelineWidget->model();
+    const Clip* currentClip = nullptr;
+    for (int ti = 0; ti < model->trackCount(); ++ti) {
+        Track* track = model->track(ti);
+        if (!track) continue;
+        for (const auto& clip : track->clips()) {
+            if (currentTime >= clip.timelineOffset && currentTime < clip.timelineOffset + clip.duration()) {
+                currentClip = &clip;
+                break;
+            }
+        }
+        if (currentClip) break;
+    }
+
+    if (!currentClip) {
+        // No clip: black screen
+        if (m_playbackEngine->isOpen()) {
+            m_playbackEngine->close();
+        }
+        m_currentClipPath.clear();
+        m_lastSourceTime = -1.0;
+        
+        QSize s = m_previewWidget->size();
+        if (!s.isValid() || s.width() < 1) s = QSize(1280, 720);
+        QImage blackFrame(s, QImage::Format_RGB32);
+        blackFrame.fill(Qt::black);
+        m_previewWidget->showVideo();
+        m_previewWidget->displayFrame(blackFrame);
+        m_previewWidget->setCurrentTime(currentTime);
+        return;
+    }
+
+    if (currentClip->type == ClipType::Image) {
+        if (m_currentClipPath != currentClip->sourcePath) {
+            if (m_playbackEngine->isOpen()) m_playbackEngine->close();
+            m_currentClipPath = currentClip->sourcePath;
+            QImage img(m_currentClipPath);
+            if (!img.isNull()) {
+                m_previewWidget->showImage(img);
+            }
+        }
+        m_previewWidget->setCurrentTime(currentTime);
+        m_lastSourceTime = -1.0;
+        return;
+    }
+
+    // Video clip
+    m_previewWidget->showVideo();
+    double sourceTime = currentTime - currentClip->timelineOffset + currentClip->sourceIn;
+    
+    bool justOpened = false;
+    if (m_currentClipPath != currentClip->sourcePath || !m_playbackEngine->isOpen()) {
+        m_playbackEngine->close();
+        if (m_playbackEngine->open(currentClip->sourcePath)) {
+            m_currentClipPath = currentClip->sourcePath;
+            justOpened = true;
+            double fps = m_playbackEngine->info().fps;
+            if (fps > 0) m_playbackController->setFps(fps);
+        } else {
+            m_currentClipPath.clear();
+            return;
+        }
+    }
+
+    // Seek if necessary (scrubbed, opened, paused, or discontinuous time)
+    bool continuous = true;
+    if (m_lastSourceTime >= 0.0) {
+        // If sourceTime jumped by a noticeable amount instead of advancing sequentially
+        if (std::abs(sourceTime - m_lastSourceTime) > 0.5) {
+            continuous = false;
+        }
+    }
+
+    bool shouldSeek = justOpened || m_forceTimelineSeek || !continuous || 
+                      m_playbackController->state() != PlaybackState::Playing;
+
+    if (shouldSeek) {
+        m_playbackEngine->seek(sourceTime);
+        m_forceTimelineSeek = false;
+        
+        // When not playing, block briefly to grab a frame so the UI updates during scrub
+        if (m_playbackController->state() != PlaybackState::Playing) {
+            TimedFrame frame;
+            for (int i = 0; i < 50; ++i) { // Wait up to 500ms
+                QThread::msleep(10);
+                frame = m_playbackEngine->nextFrame();
+                if (!frame.image.isNull()) break;
+            }
+            if (!frame.image.isNull()) {
+                m_previewWidget->displayFrame(frame.image);
+                m_lastFramePts = frame.pts;
+            }
+            m_previewWidget->setCurrentTime(currentTime);
+            m_lastSourceTime = sourceTime;
+            return;
+        }
+    }
+
     TimedFrame frame = m_playbackEngine->nextFrame();
     if (!frame.image.isNull()) {
         m_previewWidget->displayFrame(frame.image);
         m_lastFramePts = frame.pts;
-        m_previewWidget->setCurrentTime(frame.pts);
-
-        if (m_playbackFromTimeline) {
-            double timelineTime = frame.pts + m_currentClipTimeBase;
-            m_timelineWidget->model()->setPlayheadPosition(timelineTime);
-        }
-    } else if (m_playbackEngine->isFinished()) {
-        // All frames consumed and decoder hit EOF — stop playback.
-        // Use the last frame PTS as the true video duration.
-        m_playbackController->pause();
-        m_previewWidget->setDuration(m_lastFramePts);
-        m_previewWidget->setCurrentTime(m_lastFramePts);
     }
-    // When no frame is ready but not EOF, keep the last displayed time.
+    
+    m_previewWidget->setCurrentTime(currentTime);
+    m_lastSourceTime = sourceTime;
 }
 
 void MainWindow::onTimelineSeek(double relativeSeconds) {
@@ -260,61 +373,19 @@ void MainWindow::onTimelineSeek(double relativeSeconds) {
 }
 
 void MainWindow::onTimelineScrub(double relativeSeconds) {
-    // Find which clip is at this time position
-    auto* model = m_timelineWidget->model();
-
-    for (int ti = 0; ti < model->trackCount(); ++ti) {
-        Track* track = model->track(ti);
-        if (!track) continue;
-        for (const auto& clip : track->clips()) {
-            double clipStart = clip.timelineOffset;
-            double clipEnd = clipStart + clip.duration();
-            if (relativeSeconds >= clipStart && relativeSeconds < clipEnd) {
-                if (clip.type == ClipType::Image) {
-                    // Load and display image
-                    QImage img(clip.sourcePath);
-                    if (!img.isNull()) {
-                        m_playbackController->stop();
-                        m_previewWidget->showImage(img);
-                        m_currentClipPath = clip.sourcePath;
-                    }
-                    return;
-                }
-
-                // Video clip: calculate source time within clip
-                double sourceTime = relativeSeconds - clipStart + clip.sourceIn;
-
-                m_playbackFromTimeline = true;
-                m_currentClipTimeBase = clipStart - clip.sourceIn;
-
-                // Only re-open if different file
-                if (clip.sourcePath != m_currentClipPath) {
-                    m_playbackController->stop();
-                    m_playbackEngine->close();
-
-                    if (!m_playbackEngine->open(clip.sourcePath)) return;
-                    m_currentClipPath = clip.sourcePath;
-                    m_previewWidget->showVideo();
-
-                    const auto& vi = m_playbackEngine->info();
-                    m_playbackController->setFps(vi.fps > 0 ? vi.fps : 30.0);
-                    m_playbackController->setDuration(vi.duration > 0 ? vi.duration : 3600.0);
-                    m_previewWidget->setDuration(vi.duration);
-                }
-
-                // Seek to the position within the clip
-                m_playbackEngine->seek(sourceTime);
-                QThread::msleep(30);
-                TimedFrame frame = m_playbackEngine->nextFrame();
-                if (!frame.image.isNull()) {
-                    m_previewWidget->displayFrame(frame.image);
-                    m_previewWidget->setCurrentTime(sourceTime);
-                    m_lastFramePts = frame.pts;
-                }
-                return;
-            }
-        }
+    if (!m_playbackFromTimeline) {
+        m_playbackFromTimeline = true;
+        m_playbackController->stop();
+        if (m_playbackEngine->isOpen()) m_playbackEngine->close();
     }
+    
+    double dur = m_timelineWidget->model()->duration();
+    if (dur > 0) {
+        m_playbackController->setDuration(dur);
+        m_previewWidget->setDuration(dur);
+    }
+    
+    m_playbackController->seek(relativeSeconds);
 }
 
 void MainWindow::onFitFileOpened(const QString& path) {

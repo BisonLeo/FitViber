@@ -20,6 +20,7 @@ struct VideoDecoder::FFmpegContext {
     uint8_t* rgbBuffer = nullptr;
     bool eofReached = false;   // av_read_frame returned EOF
     bool flushed = false;      // flush packet sent to codec
+    double seekTarget = -1.0;  // target PTS for dropping pre-frames
 
     ~FFmpegContext() {
         if (rgbBuffer) av_free(rgbBuffer);
@@ -158,16 +159,27 @@ QImage VideoDecoder::decodeNextFrame() {
         // Try to receive a frame from the codec first (handles buffered B-frames)
         int ret = avcodec_receive_frame(m_ctx->codecCtx, m_ctx->frame);
         if (ret == 0) {
+            double pts = 0.0;
+            if (m_ctx->frame->pts != AV_NOPTS_VALUE) {
+                pts = static_cast<double>(m_ctx->frame->pts) * m_ctx->timeBase;
+            }
+
+            // Frame-accurate seek logic
+            if (m_ctx->seekTarget >= 0.0) {
+                if (pts < m_ctx->seekTarget - 0.05) {
+                    // Frame is before the target, drop it and receive the next one
+                    continue;
+                }
+                // Reached target
+                m_ctx->seekTarget = -1.0;
+            }
+
             // Got a frame — convert and return
             sws_scale(m_ctx->swsCtx,
                       m_ctx->frame->data, m_ctx->frame->linesize,
                       0, m_info.height,
                       m_ctx->rgbFrame->data, m_ctx->rgbFrame->linesize);
 
-            double pts = 0.0;
-            if (m_ctx->frame->pts != AV_NOPTS_VALUE) {
-                pts = static_cast<double>(m_ctx->frame->pts) * m_ctx->timeBase;
-            }
             m_currentTime = pts;
 
             QImage img(m_ctx->rgbFrame->data[0],
@@ -224,14 +236,21 @@ bool VideoDecoder::seek(double seconds) {
 #ifdef HAS_FFMPEG
     if (!m_isOpen || !m_ctx) return false;
 
-    int64_t timestamp = static_cast<int64_t>(seconds * AV_TIME_BASE);
-    int ret = av_seek_frame(m_ctx->fmtCtx, -1, timestamp, AVSEEK_FLAG_BACKWARD);
-    if (ret < 0) return false;
+    // Use stream time base to seek specifically in the video stream
+    int64_t timestamp = static_cast<int64_t>(seconds / m_ctx->timeBase);
+    int ret = av_seek_frame(m_ctx->fmtCtx, m_ctx->videoStreamIdx, timestamp, AVSEEK_FLAG_BACKWARD);
+    if (ret < 0) {
+        // Fallback to AV_TIME_BASE generic seek
+        timestamp = static_cast<int64_t>(seconds * AV_TIME_BASE);
+        ret = av_seek_frame(m_ctx->fmtCtx, -1, timestamp, AVSEEK_FLAG_BACKWARD);
+        if (ret < 0) return false;
+    }
 
     avcodec_flush_buffers(m_ctx->codecCtx);
     m_ctx->eofReached = false;
     m_ctx->flushed = false;
     m_currentTime = seconds;
+    m_ctx->seekTarget = seconds; // Request decodeNextFrame to drop frames before target
     return true;
 #else
     Q_UNUSED(seconds);

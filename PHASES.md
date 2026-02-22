@@ -36,6 +36,13 @@ full multi-phase plan for FitViber:
 
   - Playhead updates during video playback
 
+  Phase 5d: Use timeline for playback (upcoming)
+
+  - According the arranged clips to play video in preview widget
+  - Show only blank (black) if there is no clips at the current time marker bar
+  - When the user moves the current time marker but not playing, the preview should update
+  - When the user moves during playing, the preview should seek to that timestamp and continue
+
   Phase 6: Overlay Panels & Rendering (upcoming)
 
   - OverlayRenderer composites panels onto video frames
