@@ -20,6 +20,7 @@ struct FitRecord {
     bool hasHeartRate = false;
     bool hasCadence = false;
     bool hasPower = false;
+    bool hasGrade = false;
 };
 
 struct FitLap {

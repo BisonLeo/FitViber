@@ -11,6 +11,7 @@ public:
     ~FitTrack();
 
     void loadSession(const FitSession& session);
+    void appendSession(const FitSession& session);
     void clear();
 
     FitRecord getRecordAtTime(double unixTimestamp) const;
@@ -26,6 +27,7 @@ public:
     const FitSession& session() const { return m_session; }
 
 private:
+    void calculateInclination();
     FitRecord interpolate(const FitRecord& a, const FitRecord& b, double t) const;
 
     std::vector<FitRecord> m_records;

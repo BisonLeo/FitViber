@@ -71,6 +71,11 @@ public:
         if (mesg.IsTemperatureValid())
             r.temperature = static_cast<float>(mesg.GetTemperature());
 
+        if (mesg.IsGradeValid()) {
+            r.grade = mesg.GetGrade();
+            r.hasGrade = true;
+        }
+
         session.records.push_back(r);
     }
 

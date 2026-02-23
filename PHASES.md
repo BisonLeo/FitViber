@@ -52,6 +52,12 @@ full multi-phase plan for FitViber:
 
   Phase 7: FIT ↔ Video Time Sync
 
+  - Allow loaded fit media clips to preview play in preview widget by using the previous overlay panels (background is black)
+  - Add load fit data file into timeline widget 
+  - The fit data should occupy a separate row in timeline above the video/image row but share the same timeline
+  - If the fit data is loaded into an empty timeline widget, recalculate the timeline to the actual fit data time ranges, scale as well such that the whole fit data duration takes about 70% of the current horizontal
+  - If the fit data is loaded after importing video clips, ignore the actual fit timestamps but only put fit data below the video/image row and allow user to adjust the offset by dragging the fit data clip
+  - Multiple fit data clips in timeline is also allowed. Except the first clip, subsequent clips are auto snapped to the end points of existing fit clips
   - TimeSync offset alignment between FIT track and video clips
   - Drag-to-sync in timeline UI
 

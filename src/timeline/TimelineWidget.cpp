@@ -3,6 +3,7 @@
 #include "Track.h"
 #include "TimeUtil.h"
 #include "MediaProbe.h"
+#include "FitParser.h"
 #include <QPainter>
 #include <QMouseEvent>
 #include <QKeyEvent>
@@ -155,52 +156,91 @@ void TimelineWidget::addClipFromFile(const QString& path) {
     // Classify media type
     QStringList imageExts = {"jpg", "jpeg", "png", "bmp", "tiff", "tif"};
     bool isImage = imageExts.contains(suffix);
+    bool isFit = (suffix == "fit");
 
-    // Get absolute timestamp
-    double absTimestamp = TimeUtil::extractMediaTimestamp(path);
-
-    // Get duration
+    double absTimestamp = 0.0;
     double duration = 5.0; // default for images
-    if (!isImage) {
-        MediaProbe probe;
-        if (probe.probe(path)) {
-            duration = probe.info().duration;
+
+    if (isFit) {
+        FitParser parser;
+        if (!parser.parse(path)) {
+            return; // failed to parse
+        }
+        absTimestamp = parser.session().startTime;
+        duration = parser.session().totalElapsedTime;
+        if (duration <= 0.0) {
+            duration = parser.session().endTime - parser.session().startTime;
+        }
+        if (duration <= 0.0) duration = 1.0;
+    } else {
+        absTimestamp = TimeUtil::extractMediaTimestamp(path);
+        if (!isImage) {
+            MediaProbe probe;
+            if (probe.probe(path)) {
+                duration = probe.info().duration;
+            }
         }
     }
 
     // Find or create appropriate track
-    QString trackName = isImage ? "Images" : "Video";
+    TrackType targetType = isFit ? TrackType::FitData : TrackType::Video;
+    QString trackName = isFit ? "Data" : (isImage ? "Images" : "Video");
+    
     Track* targetTrack = nullptr;
     int targetTrackIndex = -1;
     for (int i = 0; i < m_model->trackCount(); ++i) {
         Track* t = m_model->track(i);
-        if (t->type() == TrackType::Video) {
+        if (t->type() == targetType) {
             targetTrack = t;
             targetTrackIndex = i;
             break;
         }
     }
+    
     if (!targetTrack) {
-        targetTrack = m_model->addTrack(TrackType::Video, trackName);
-        targetTrackIndex = m_model->trackCount() - 1;
+        // Ensure FitData is above Video (index 0)
+        if (isFit) {
+            targetTrack = m_model->insertTrack(0, targetType, trackName);
+            targetTrackIndex = 0;
+        } else {
+            targetTrack = m_model->addTrack(targetType, trackName);
+            targetTrackIndex = m_model->trackCount() - 1;
+        }
     }
 
     double relativeOffset = 0.0;
 
-    if (targetTrack->clipCount() == 0) {
-        // First clip on this track: use its absolute timestamp as the time origin
-        if (m_model->timeOrigin() == 0.0) {
-            m_model->setTimeOrigin(absTimestamp);
+    // Check if timeline is effectively empty
+    bool isTimelineEmpty = true;
+    for (int i = 0; i < m_model->trackCount(); ++i) {
+        if (m_model->track(i)->clipCount() > 0) {
+            isTimelineEmpty = false;
+            break;
         }
-        relativeOffset = m_model->absoluteToRelative(absTimestamp);
+    }
+
+    if (isTimelineEmpty) {
+        m_model->setTimeOrigin(absTimestamp);
+        relativeOffset = 0.0;
+        int w = width();
+        if (w > 0 && duration > 0.0) {
+            double targetZoom = (w * 0.7) / duration;
+            m_model->setZoom(targetZoom);
+        }
     } else {
-        // Subsequent clips: place at the end of the last clip (append, no overlap)
-        double trackEnd = 0.0;
-        for (const auto& c : targetTrack->clips()) {
-            double cEnd = c.timelineOffset + c.duration();
-            if (cEnd > trackEnd) trackEnd = cEnd;
+        // Timeline is not empty
+        if (targetTrack->clipCount() == 0) {
+            // Ignore actual timestamp, put it at current playhead
+            relativeOffset = m_model->playheadPosition();
+        } else {
+            // Snap to end of existing clips on this track
+            double trackEnd = 0.0;
+            for (const auto& c : targetTrack->clips()) {
+                double cEnd = c.timelineOffset + c.duration();
+                if (cEnd > trackEnd) trackEnd = cEnd;
+            }
+            relativeOffset = trackEnd;
         }
-        relativeOffset = trackEnd;
     }
 
     // Ensure no overlap with existing clips
@@ -210,7 +250,7 @@ void TimelineWidget::addClipFromFile(const QString& path) {
     Clip clip;
     clip.sourcePath = path;
     clip.displayName = fi.fileName();
-    clip.type = isImage ? ClipType::Image : ClipType::Video;
+    clip.type = isFit ? ClipType::FitData : (isImage ? ClipType::Image : ClipType::Video);
     clip.sourceIn = 0.0;
     clip.sourceOut = duration;
     clip.timelineOffset = relativeOffset;
@@ -492,6 +532,7 @@ void TimelineWidget::mouseMoveEvent(QMouseEvent* event) {
         newTime = resolveOverlap(m_dragTrack, newTime, clip.duration(), m_dragClip);
 
         clip.timelineOffset = newTime;
+        emit clipMoved(m_dragTrack, m_dragClip, newTime);
         update();
     }
 }
@@ -604,10 +645,6 @@ void TimelineWidget::dropEvent(QDropEvent* event) {
     for (const QUrl& url : mime->urls()) {
         if (!url.isLocalFile()) continue;
         QString path = url.toLocalFile();
-
-        // Skip FIT files
-        QFileInfo fi(path);
-        if (fi.suffix().toLower() == "fit") continue;
 
         addClipFromFile(path);
     }

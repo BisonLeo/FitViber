@@ -22,6 +22,7 @@ signals:
     void playheadScrubbed(double seconds);
     void seekRequested(double seconds);
     void clipAdded(const QString& path, double timelineOffset, double duration);
+    void clipMoved(int trackIndex, int clipIndex, double newOffset);
 
 protected:
     void paintEvent(QPaintEvent* event) override;

@@ -12,6 +12,7 @@ public:
     ~TimelineModel();
 
     Track* addTrack(TrackType type, const QString& name);
+    Track* insertTrack(int index, TrackType type, const QString& name);
     void removeTrack(int index);
     int trackCount() const { return static_cast<int>(m_tracks.size()); }
     Track* track(int index);
