@@ -46,7 +46,8 @@ private:
     PlaybackController* m_playbackController = nullptr;
 
     std::unique_ptr<OverlayRenderer> m_overlayRenderer;
-    std::unique_ptr<FitTrack> m_fitTrack;
+    std::unique_ptr<FitTrack> m_timelineFitTrack;
+    std::unique_ptr<FitTrack> m_previewFitTrack;
     std::unique_ptr<TimeSync> m_timeSync;
     std::unique_ptr<VideoPlaybackEngine> m_playbackEngine;
     double m_lastFramePts = 0.0;  // tracks actual video duration from decoded PTS

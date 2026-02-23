@@ -26,7 +26,8 @@
 MainWindow::MainWindow(QWidget* parent)
     : QMainWindow(parent)
     , m_overlayRenderer(std::make_unique<OverlayRenderer>())
-    , m_fitTrack(std::make_unique<FitTrack>())
+    , m_timelineFitTrack(std::make_unique<FitTrack>())
+    , m_previewFitTrack(std::make_unique<FitTrack>())
     , m_timeSync(std::make_unique<TimeSync>())
     , m_playbackEngine(std::make_unique<VideoPlaybackEngine>())
 {
@@ -183,18 +184,17 @@ void MainWindow::connectSignals() {
     connect(m_timelineWidget, &TimelineWidget::playheadScrubbed,
             this, &MainWindow::onTimelineScrub);
             
-    connect(m_timelineWidget, &TimelineWidget::clipAdded, this, [this](const QString& path, double offset, double dur) {
-        if (QFileInfo(path).suffix().toLower() == "fit") {
-            FitParser parser;
-            if (parser.parse(path)) {
-                if (!m_fitTrack) m_fitTrack = std::make_unique<FitTrack>();
-                m_fitTrack->appendSession(parser.session());
-                
-                // For TimeSync offset logic, we just set it based on the first clip added to help the generic TimeSync
-                if (m_fitTrack->records().size() == parser.session().records.size()) {
-                    m_timeSync->setFitTimeOffset(parser.session().startTime - offset);
-                }
-            }
+        connect(m_timelineWidget, &TimelineWidget::clipAdded, this, [this](const QString& path, double offset, double dur) {
+            if (QFileInfo(path).suffix().toLower() == "fit") {
+                FitParser parser;
+                if (parser.parse(path)) {
+                    if (!m_timelineFitTrack) m_timelineFitTrack = std::make_unique<FitTrack>();
+                    m_timelineFitTrack->appendSession(parser.session());
+    
+                    // For TimeSync offset logic, we just set it based on the first clip added to help the generic TimeSync
+                    if (m_timelineFitTrack->records().size() == parser.session().records.size()) {
+                        m_timeSync->setFitTimeOffset(parser.session().startTime - offset);
+                    }            }
         }
     });
 
@@ -223,6 +223,7 @@ void MainWindow::onMediaSelected(const QString& path) {
         m_playbackController->stop();
         m_playbackEngine->close();
         m_previewFitData = false;
+        if (m_previewFitTrack) m_previewFitTrack->clear();
 
         QImage img(path);
         if (!img.isNull()) {
@@ -238,6 +239,7 @@ void MainWindow::onMediaSelected(const QString& path) {
     m_playbackController->stop();
     m_playbackEngine->close();
     m_previewFitData = false;
+    if (m_previewFitTrack) m_previewFitTrack->clear();
 
     m_playbackFromTimeline = false;
     m_currentClipPath = path;
@@ -467,34 +469,25 @@ void MainWindow::renderOverlay(QImage& frame, double currentTime) {
             if (currentFitClip) break;
         }
 
-        if (currentFitClip && m_fitTrack && !m_fitTrack->isEmpty()) {
+        if (currentFitClip && m_timelineFitTrack && !m_timelineFitTrack->isEmpty()) {
             double sourceTime = currentTime - currentFitClip->timelineOffset + currentFitClip->absoluteStartTime;
-            // Apply drag-to-sync offset if the user synced via TimeSync
-            rec = m_fitTrack->getRecordAtTime(sourceTime + m_timeSync->fitTimeOffset());
-            sessionToRender = &m_fitTrack->session();
+            // The timeline offset visually controls sync, no need for the global TimeSync offset here
+            rec = m_timelineFitTrack->getRecordAtTime(sourceTime);
+            sessionToRender = &m_timelineFitTrack->session();
             hasFitData = true;
         }
     } else {
-        if (m_fitTrack && !m_fitTrack->isEmpty()) {
+        if (m_previewFitTrack && !m_previewFitTrack->isEmpty()) {
             // For standalone preview
-            double searchTime = m_previewFitData ? currentTime + m_fitTrack->startTime() : currentTime + m_timeSync->fitTimeOffset();
-            rec = m_fitTrack->getRecordAtTime(searchTime);
-            sessionToRender = &m_fitTrack->session();
+            double searchTime = m_previewFitData ? currentTime + m_previewFitTrack->startTime() : currentTime + m_timeSync->fitTimeOffset();
+            rec = m_previewFitTrack->getRecordAtTime(searchTime);
+            sessionToRender = &m_previewFitTrack->session();
             hasFitData = true;
         }
     }
 
     if (!hasFitData) {
-        double loopTime = std::fmod(currentTime, 10.0);
-        double progress = loopTime / 10.0;
-        rec.speed = (progress * 200.0f) / 3.6f;
-        rec.distance = (progress * 100.0f) * 1000.0f;
-        rec.heartRate = progress * 200.0f;
-        rec.hasHeartRate = true;
-        rec.altitude = -100.0f + progress * 10100.0f;
-        rec.grade = -90.0f + progress * 180.0f;
-        dummySesh.records.push_back(rec);
-        sessionToRender = &dummySesh;
+        return; // Do not render overlay if there's no fit data
     }
 
     m_overlayRenderer->render(frame, rec, *sessionToRender);
@@ -521,26 +514,25 @@ void MainWindow::onFitFileOpened(const QString& path) {
 
     FitParser parser;
     if (parser.parse(path)) {
-        if (!m_fitTrack) {
-            m_fitTrack = std::make_unique<FitTrack>();
-        }
-        m_fitTrack->loadSession(parser.session());
-        statusBar()->showMessage(QString("Loaded FIT file: %1 (Records: %2)").arg(QFileInfo(path).fileName()).arg(m_fitTrack->records().size()));
-
-        m_playbackController->stop();
-        m_playbackEngine->close();
+                if (!m_previewFitTrack) {
+                    m_previewFitTrack = std::make_unique<FitTrack>();
+                }
+                m_previewFitTrack->loadSession(parser.session());
+                statusBar()->showMessage(QString("Loaded FIT file: %1 (Records: %2)").arg(QFileInfo(path).fileName()).arg(m_previewFitTrack->records().size()));
         
-        m_playbackFromTimeline = false;
-        m_previewFitData = true;
-        m_currentClipPath = path;
-
-        m_playbackController->setFps(30.0);
-        m_playbackController->setDuration(m_fitTrack->duration());
-        m_lastFramePts = 0.0;
-
-        m_previewWidget->showVideo();
-        m_previewWidget->setDuration(m_fitTrack->duration());
+                m_playbackController->stop();
+                m_playbackEngine->close();
+                
+                m_playbackFromTimeline = false;
+                m_previewFitData = true;
+                m_currentClipPath = path;
         
+                m_playbackController->setFps(30.0);
+                m_playbackController->setDuration(m_previewFitTrack->duration()); 
+                m_lastFramePts = 0.0;
+        
+                m_previewWidget->showVideo();
+                m_previewWidget->setDuration(m_previewFitTrack->duration());        
         // Force an update to show the first frame
         onPlaybackTick(0.0);
     } else {

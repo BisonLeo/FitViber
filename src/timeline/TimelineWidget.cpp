@@ -13,6 +13,7 @@
 #include <QDropEvent>
 #include <QMimeData>
 #include <QMenu>
+#include <QMessageBox>
 #include <QFileInfo>
 #include <QUrl>
 #include <algorithm>
@@ -323,7 +324,6 @@ void TimelineWidget::paintRuler(QPainter& painter, const QRect& rect) {
 
     for (double t = std::floor(startTime / tickInterval) * tickInterval;
          t <= endTime; t += tickInterval) {
-        if (t < 0) continue;
         int x = rect.left() + static_cast<int>((t - offset) * pixelsPerSecond);
         if (x < rect.left() || x > rect.right()) continue;
 
@@ -447,6 +447,14 @@ void TimelineWidget::paintPlayhead(QPainter& painter, const QRect& rect) {
 // --- Mouse events ---
 
 void TimelineWidget::mousePressEvent(QMouseEvent* event) {
+    if (event->button() == Qt::MiddleButton) {
+        m_panning = true;
+        m_panStartX = static_cast<int>(event->position().x());
+        m_panStartScroll = m_model->scrollOffset();
+        setCursor(Qt::ClosedHandCursor);
+        return;
+    }
+
     if (event->button() != Qt::LeftButton) return;
 
     int mx = static_cast<int>(event->position().x());
@@ -458,7 +466,7 @@ void TimelineWidget::mousePressEvent(QMouseEvent* event) {
     if (my < RulerHeight) {
         m_scrubbing = true;
         double time = xToTime(mx);
-        m_model->setPlayheadPosition(std::max(0.0, time));
+        m_model->setPlayheadPosition(time);
         emit playheadScrubbed(time);
         update();
         return;
@@ -508,9 +516,16 @@ void TimelineWidget::mousePressEvent(QMouseEvent* event) {
 void TimelineWidget::mouseMoveEvent(QMouseEvent* event) {
     int mx = static_cast<int>(event->position().x());
 
+    if (m_panning) {
+        double dx = mx - m_panStartX;
+        m_model->setScrollOffset(m_panStartScroll - dx / m_model->zoom());
+        update();
+        return;
+    }
+
     if (m_scrubbing) {
         double time = xToTime(mx);
-        m_model->setPlayheadPosition(std::max(0.0, time));
+        m_model->setPlayheadPosition(time);
         emit playheadScrubbed(time);
         update();
         return;
@@ -525,7 +540,6 @@ void TimelineWidget::mouseMoveEvent(QMouseEvent* event) {
 
         Clip& clip = track->clips()[m_dragClip];
         double newTime = xToTime(mx) - m_dragClickOffset;
-        newTime = std::max(0.0, newTime);
 
         // Apply snapping, then prevent overlap
         newTime = snapToClipEdges(m_dragTrack, newTime, clip.duration(), m_dragClip);
@@ -538,6 +552,11 @@ void TimelineWidget::mouseMoveEvent(QMouseEvent* event) {
 }
 
 void TimelineWidget::mouseReleaseEvent(QMouseEvent* event) {
+    if (event->button() == Qt::MiddleButton && m_panning) {
+        m_panning = false;
+        setCursor(Qt::ArrowCursor);
+        return;
+    }
     if (event->button() == Qt::LeftButton) {
         if (m_scrubbing) {
             m_scrubbing = false;
@@ -607,6 +626,110 @@ void TimelineWidget::contextMenuEvent(QContextMenuEvent* event) {
         update();
     });
 
+    menu.addSeparator();
+
+    QAction* realignAction = menu.addAction("Realign");
+    connect(realignAction, &QAction::triggered, this, [this, hit]() {
+        QMessageBox::StandardButton reply = QMessageBox::question(this, "Realign", 
+            "Timeline timestamps will be recalculated based on the current selected clip. Continue?",
+            QMessageBox::Yes | QMessageBox::No);
+        if (reply == QMessageBox::Yes) {
+            Track* t = m_model->track(hit.first);
+            if (t && hit.second < t->clipCount()) {
+                double targetStartOffset = 0.0;
+                double shift = targetStartOffset - t->clip(hit.second).timelineOffset;
+                
+                // Find minimum offset after shift to avoid negative timeline positions
+                double minNewOffset = 0.0;
+                for (int i = 0; i < m_model->trackCount(); ++i) {
+                    Track* tr = m_model->track(i);
+                    for (int j = 0; j < tr->clipCount(); ++j) {
+                        double noff = tr->clips()[j].timelineOffset + shift;
+                        if (noff < minNewOffset) minNewOffset = noff;
+                    }
+                }
+                
+                // Adjust shift so that the earliest clip starts at 0
+                shift -= minNewOffset; 
+                
+                for (int i = 0; i < m_model->trackCount(); ++i) {
+                    Track* tr = m_model->track(i);
+                    for (int j = 0; j < tr->clipCount(); ++j) {
+                        tr->clips()[j].timelineOffset += shift;
+                        emit clipMoved(i, j, tr->clips()[j].timelineOffset);
+                    }
+                }
+                
+                double maxDur = m_model->duration();
+                if (maxDur > 0) {
+                    double targetZoom = (this->width() - TrackHeaderWidth) * 0.9 / maxDur;
+                    m_model->setZoom(std::max(0.001, targetZoom));
+                    m_model->setScrollOffset(0);
+                }
+                update();
+            }
+        }
+    });
+
+    QAction* relocateAction = menu.addAction("Relocate");
+    connect(relocateAction, &QAction::triggered, this, [this, hit]() {
+        Track* currentTrack = m_model->track(hit.first);
+        if (!currentTrack || hit.second >= currentTrack->clipCount()) return;
+        
+        Clip& clipToMove = currentTrack->clips()[hit.second];
+        
+        double epoch = 0.0;
+        bool epochFound = false;
+        
+        // Find reference epoch from FitData track
+        for (int i = 0; i < m_model->trackCount(); ++i) {
+            Track* tr = m_model->track(i);
+            if (tr->type() == TrackType::FitData && tr->clipCount() > 0) {
+                const Clip& refClip = tr->clips()[0];
+                if (&refClip != &clipToMove) {
+                    epoch = refClip.absoluteStartTime - refClip.timelineOffset;
+                    epochFound = true;
+                    break;
+                }
+            }
+        }
+        
+        // Fallback to first video clip
+        if (!epochFound) {
+            for (int i = 0; i < m_model->trackCount(); ++i) {
+                Track* tr = m_model->track(i);
+                if (tr->type() == TrackType::Video && tr->clipCount() > 0) {
+                    const Clip& refClip = tr->clips()[0];
+                    if (&refClip != &clipToMove) {
+                        epoch = refClip.absoluteStartTime - refClip.timelineOffset;
+                        epochFound = true;
+                        break;
+                    }
+                }
+            }
+        }
+        
+        if (epochFound) {
+            double newOffset = clipToMove.absoluteStartTime - epoch;
+            newOffset = std::max(0.0, newOffset);
+            
+            newOffset = resolveOverlap(hit.first, newOffset, clipToMove.duration(), hit.second);
+            clipToMove.timelineOffset = newOffset;
+            
+            emit clipMoved(hit.first, hit.second, newOffset);
+            
+            double maxDur = m_model->duration();
+            if (maxDur > 0) {
+                double targetZoom = (this->width() - TrackHeaderWidth) * 0.9 / maxDur;
+                m_model->setZoom(std::max(0.001, targetZoom));
+                m_model->setScrollOffset(0);
+            }
+            update();
+        } else {
+            QMessageBox::information(this, "Relocate", "No reference clip found to establish timeline scale.");
+        }
+    });
+
     menu.exec(event->globalPos());
 }
 
@@ -614,8 +737,16 @@ void TimelineWidget::contextMenuEvent(QContextMenuEvent* event) {
 
 void TimelineWidget::wheelEvent(QWheelEvent* event) {
     if (event->modifiers() & Qt::ControlModifier) {
+        // Zoom around the mouse cursor position
+        int mx = static_cast<int>(event->position().x());
+        double timeAtCursor = xToTime(mx);
+
         double factor = event->angleDelta().y() > 0 ? 1.2 : 1.0 / 1.2;
         m_model->setZoom(m_model->zoom() * factor);
+
+        // Adjust scroll so timeAtCursor stays at the same pixel position
+        double newScroll = timeAtCursor - (mx - TrackHeaderWidth) / m_model->zoom();
+        m_model->setScrollOffset(newScroll);
         update();
     } else {
         double delta = event->angleDelta().y() > 0 ? -2.0 : 2.0;

@@ -70,6 +70,11 @@ private:
     int m_dragClip = -1;
     double m_dragClickOffset = 0.0;  // time offset from clip start to mouse click
 
+    // Middle-button pan state
+    bool m_panning = false;
+    int m_panStartX = 0;
+    double m_panStartScroll = 0.0;
+
     static constexpr int RulerHeight = 28;
     static constexpr int TrackHeight = 40;
     static constexpr int TrackHeaderWidth = 80;

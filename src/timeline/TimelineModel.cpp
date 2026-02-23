@@ -55,7 +55,7 @@ void TimelineModel::setZoom(double zoom) {
 }
 
 void TimelineModel::setScrollOffset(double offset) {
-    m_scrollOffset = std::max(0.0, offset);
+    m_scrollOffset = offset;
 }
 
 void TimelineModel::setTimeOrigin(double unixTimestamp) {

@@ -6,21 +6,26 @@ ElevationPanel::ElevationPanel(QObject* parent) : OverlayPanel(PanelType::Elevat
     m_config.x = 0.68;
     m_config.y = 0.10;
     m_config.width = 0.28;
-    m_config.height = 0.10;
+    m_config.height = 0.24;
 }
 
 void ElevationPanel::paint(QPainter& painter, const QRect& rect,
                            const FitRecord& record, const FitSession& session) {
-    double scale = rect.height() / 100.0;
-    // Align text/bar to the left side of this wider rect
-    QPointF base = rect.topLeft() + QPointF(110 * scale, 64 * scale);
-    
+    // Split rect into text region (top ~35%) and graph region (bottom ~65%)
+    int textHeight = static_cast<int>(rect.height() * 0.35);
+    QRect textRect(rect.left(), rect.top(), rect.width(), textHeight);
+    QRect graphRect(rect.left(), rect.top() + textHeight, rect.width(), rect.height() - textHeight);
+
+    // --- Text + Bar section (right-aligned, matching inclination panel) ---
+    double scale = textRect.height() / 100.0;
+    QPointF base = textRect.topRight() + QPointF(-10 * scale, 64 * scale);
+
     QString eleStr = QString::number(static_cast<int>(record.altitude));
 
-    // Draw Text
+    // Draw Text (right-aligned from base)
     double unitW = drawSvgText(painter, base + QPointF(-25 * scale, 0), "M", 36 * scale, Qt::white, Qt::AlignRight, true);
     drawSvgText(painter, base + QPointF(-25 * scale - unitW - 10 * scale, 0), eleStr, 64 * scale, Qt::white, Qt::AlignRight, true);
-    drawSvgText(painter, base + QPointF(-25 * scale, 35 * scale), m_config.label, 22 * scale, QColor(221, 221, 221), Qt::AlignRight, false);  
+    drawSvgText(painter, base + QPointF(-25 * scale, 35 * scale), m_config.label, 22 * scale, QColor(221, 221, 221), Qt::AlignRight, false);
 
     // Determine bounds
     float minAlt = -100;
@@ -35,7 +40,7 @@ void ElevationPanel::paint(QPainter& painter, const QRect& rect,
         if (maxAlt - minAlt < 10) maxAlt = minAlt + 10;
     }
 
-    // Draw Bar Graph Background
+    // Draw Bar Graph Background (next to text)
     QRectF bgBar(base.x() - 8 * scale, base.y() - 45 * scale, 8 * scale, 90 * scale);
     painter.setPen(Qt::NoPen);
     painter.setBrush(QColor(255, 255, 255, 76)); // 0.3 alpha
@@ -54,13 +59,13 @@ void ElevationPanel::paint(QPainter& painter, const QRect& rect,
         painter.drawRoundedRect(fgBar, 4 * scale, 4 * scale);
     }
 
-    // Sketch Graph on the right
+    // --- Elevation Profile Graph section (uses graphRect, full width, pushed down a bit) ---
     if (session.records.empty()) return;
 
-    QRectF graphRect(rect.left() + 130 * scale, rect.top() + 10 * scale, 
-                     rect.width() - 140 * scale, rect.height() - 20 * scale);
-    
-    if (graphRect.width() <= 0) return;
+    QRectF gRect(graphRect.left() + 10, graphRect.top() + 15,
+                 graphRect.width() - 20, graphRect.height() - 20);
+
+    if (gRect.width() <= 0 || gRect.height() <= 0) return;
 
     float maxDist = session.totalDistance > 0 ? session.totalDistance : 0.01f;
     if (session.records.back().distance > maxDist) maxDist = session.records.back().distance;
@@ -69,18 +74,18 @@ void ElevationPanel::paint(QPainter& painter, const QRect& rect,
     QPainterPath fillPath;
     QPainterPath topPath;
     QPainterPath remainingPath;
-    
-    fillPath.moveTo(graphRect.left(), graphRect.bottom());
-    
+
+    fillPath.moveTo(gRect.left(), gRect.bottom());
+
     bool topStarted = false;
     bool remStarted = false;
-    QPointF lastPoint(graphRect.left(), graphRect.bottom());
+    QPointF lastPoint(gRect.left(), gRect.bottom());
 
     for (const auto& r : session.records) {
-        double px = graphRect.left() + graphRect.width() * (r.distance / maxDist);
-        double py = graphRect.bottom() - graphRect.height() * ((r.altitude - minAlt) / (maxAlt - minAlt));
+        double px = gRect.left() + gRect.width() * (r.distance / maxDist);
+        double py = gRect.bottom() - gRect.height() * ((r.altitude - minAlt) / (maxAlt - minAlt));
         QPointF pt(px, py);
-        
+
         if (r.timestamp <= record.timestamp) {
             fillPath.lineTo(pt);
             if (!topStarted) {
@@ -106,9 +111,9 @@ void ElevationPanel::paint(QPainter& painter, const QRect& rect,
     }
 
     if (topStarted) {
-        fillPath.lineTo(lastPoint.x(), graphRect.bottom());
+        fillPath.lineTo(lastPoint.x(), gRect.bottom());
         fillPath.closeSubpath();
-        
+
         painter.setPen(Qt::NoPen);
         painter.setBrush(QColor(136, 230, 174, 100)); // #88E6AE with opacity
         painter.drawPath(fillPath);

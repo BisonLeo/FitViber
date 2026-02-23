@@ -24,7 +24,7 @@ void InclinationPanel::paint(QPainter& painter, const QRect& rect,
     drawSvgText(painter, base + QPointF(-25 * scale, 35 * scale), m_config.label, 22 * scale, QColor(221, 221, 221), Qt::AlignRight, false);
     
     // Draw Half-Circle Wedge Background
-    QPointF arcCenter = base + QPointF(-40 * scale, 60 * scale);
+    QPointF arcCenter = base + QPointF(-40 * scale, 90 * scale);
     double r = 45 * scale;
     
     // Qt: 0 is 3 o'clock, 90 is 12 o'clock, 180 is 9 o'clock, 270 is 6 o'clock.

@@ -1,5 +1,6 @@
 #include "SpeedPanel.h"
 #include <QLinearGradient>
+#include <QDateTime>
 
 SpeedPanel::SpeedPanel(QObject* parent) : OverlayPanel(PanelType::Speed, parent) {
     m_config.label = defaultLabel();
@@ -40,4 +41,11 @@ void SpeedPanel::paint(QPainter& painter, const QRect& rect,
     // Text
     drawSvgText(painter, center + QPointF(0, 30 * scale), QString::number(qRound(speed)), 110 * scale, Qt::white, Qt::AlignHCenter, true);
     drawSvgText(painter, center + QPointF(0, 80 * scale), "KM/H", 22 * scale, Qt::white, Qt::AlignHCenter, true);
+
+    // Timestamp (local timezone) for sync verification
+    if (record.timestamp > 0) {
+        QDateTime dt = QDateTime::fromSecsSinceEpoch(static_cast<qint64>(record.timestamp), Qt::LocalTime);
+        QString tsStr = dt.toString("yyyy-MM-dd HH:mm:ss");
+        drawSvgText(painter, center + QPointF(0, 115 * scale), tsStr, 18 * scale, QColor(200, 200, 200), Qt::AlignHCenter, false);
+    }
 }

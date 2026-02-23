@@ -24,7 +24,26 @@ void FitTrack::appendSession(const FitSession& session) {
         [](const FitRecord& a, const FitRecord& b) { return a.timestamp < b.timestamp; });
     std::sort(m_laps.begin(), m_laps.end(),
         [](const FitLap& a, const FitLap& b) { return a.startTime < b.startTime; });
-        
+
+    // Rebuild m_session to reflect all accumulated records
+    m_session.records = m_records;
+    m_session.laps = m_laps;
+    if (!m_records.empty()) {
+        m_session.startTime = m_records.front().timestamp;
+        m_session.endTime = m_records.back().timestamp;
+        m_session.totalElapsedTime = static_cast<float>(m_session.endTime - m_session.startTime);
+    }
+    // Merge session-level stats from incoming session
+    m_session.totalDistance = std::max(m_session.totalDistance, session.totalDistance);
+    if (session.totalDistance > m_session.totalDistance) {
+        m_session.totalDistance = session.totalDistance;
+    }
+    // Recompute totalDistance from records if available
+    if (!m_records.empty() && m_records.back().distance > 0) {
+        m_session.totalDistance = m_records.back().distance;
+    }
+    m_session.updateBounds();
+
     calculateInclination();
 }
 

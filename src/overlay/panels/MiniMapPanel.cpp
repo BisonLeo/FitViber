@@ -16,24 +16,36 @@ void MiniMapPanel::paint(QPainter& painter, const QRect& rect,
 
     if (session.records.empty() || !record.hasGps) return;
 
-    double latRange = session.maxLat - session.minLat;
-    double lonRange = session.maxLon - session.minLon;
-    if (latRange < 1e-9 || lonRange < 1e-9) return;
-
     // Use a square bounding box centered in rect
     int side = std::min(rect.width(), rect.height());
     QRect mapRect(rect.center().x() - side / 2 + 10, rect.center().y() - side / 2 + 10, side - 20, side - 20);
 
-    double scaleX = mapRect.width() / lonRange;
-    double scaleY = mapRect.height() / latRange;
+    // Approximate meters per degree at this latitude
+    double metersPerLat = 111320.0;
+    double metersPerLon = 111320.0 * std::cos(record.latitude * 3.14159265358979323846 / 180.0);
+
+    // Speed in m/s. Base zoom level (half-width of map in meters)
+    // Speed 0: 50m half-width (100m total width)
+    // Speed 10 m/s (36 km/h): 150m half-width
+    double speedMs = std::max(0.0f, record.speed);
+    double targetHalfWidthMeters = 50.0 + (speedMs * 10.0);
+    
+    // Optional: clamp maximum zoom out to prevent seeing too much of the map at extreme speeds
+    targetHalfWidthMeters = std::min(targetHalfWidthMeters, 2000.0);
+
+    // Convert target width in meters to degrees
+    double halfLatRange = targetHalfWidthMeters / metersPerLat;
+    double halfLonRange = targetHalfWidthMeters / metersPerLon;
+
+    // We want mapRect.width() to represent (2 * halfLonRange) degrees
+    double scaleX = mapRect.width() / (2.0 * halfLonRange);
+    double scaleY = mapRect.height() / (2.0 * halfLatRange);
     double mapScale = std::min(scaleX, scaleY);
 
-    double xOffset = mapRect.center().x() - (lonRange / 2.0) * mapScale;
-    double yOffset = mapRect.center().y() + (latRange / 2.0) * mapScale;
-
+    // Center the map on the current record's position
     auto toPoint = [&](double lat, double lon) -> QPointF {
-        double x = xOffset + (lon - session.minLon) * mapScale;
-        double y = yOffset - (lat - session.minLat) * mapScale;
+        double x = mapRect.center().x() + (lon - record.longitude) * mapScale;
+        double y = mapRect.center().y() - (lat - record.latitude) * mapScale;
         return QPointF(x, y);
     };
 
@@ -46,6 +58,18 @@ void MiniMapPanel::paint(QPainter& painter, const QRect& rect,
 
     for (const auto& r : session.records) {
         if (!r.hasGps) continue;
+        
+        // Optimization: skip points outside the visual area (with a small margin)
+        if (std::abs(r.latitude - record.latitude) > halfLatRange * 2.0 || 
+            std::abs(r.longitude - record.longitude) > halfLonRange * 2.0) {
+            
+            // If we've started a path, we should still track the last point in case the next one jumps in
+            if (r.timestamp <= record.timestamp) {
+                lastPoint = toPoint(r.latitude, r.longitude);
+            }
+            continue;
+        }
+
         QPointF p = toPoint(r.latitude, r.longitude);
 
         if (r.timestamp <= record.timestamp) {
