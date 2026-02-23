@@ -263,7 +263,7 @@ void MainWindow::onPlaybackTick(double currentTime) {
                 rec.heartRate = progress * 200.0f;
                 rec.hasHeartRate = true;
                 rec.altitude = -100.0f + progress * 10100.0f;
-                rec.grade = -100.0f + progress * 200.0f;
+                rec.grade = -90.0f + progress * 180.0f;
                 sesh.records.push_back(rec);
             }
 
@@ -429,7 +429,7 @@ void MainWindow::onPlaybackTick(double currentTime) {
             rec.heartRate = progress * 200.0f;
             rec.hasHeartRate = true;
             rec.altitude = -100.0f + progress * 10100.0f;
-            rec.grade = -100.0f + progress * 200.0f;
+            rec.grade = -90.0f + progress * 180.0f;
             sesh.records.push_back(rec);
         }
 
