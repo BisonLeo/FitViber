@@ -15,6 +15,7 @@ struct FitRecord {
     float power = 0.0f;           // watts
     float distance = 0.0f;        // meters (cumulative)
     float temperature = 0.0f;     // celsius
+    float grade = 0.0f;           // inclination / slope degree
     bool hasGps = false;
     bool hasHeartRate = false;
     bool hasCadence = false;

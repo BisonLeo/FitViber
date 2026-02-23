@@ -16,7 +16,8 @@ enum class PanelType {
     Elevation,
     MiniMap,
     Distance,
-    Lap
+    Lap,
+    Inclination
 };
 
 struct PanelConfig {
@@ -56,6 +57,15 @@ protected:
     void paintLabel(QPainter& painter, const QRect& rect, const QString& label);
     void paintValue(QPainter& painter, const QRect& rect,
                     const QString& value, const QString& unit);
+
+    // Modern SVG-styled helpers
+    double drawSvgText(QPainter& painter, QPointF baselinePos, const QString& text, 
+                     double fontSize, QColor color, Qt::Alignment align = Qt::AlignLeft,
+                     bool isBold = false);
+    
+    void drawSvgArc(QPainter& painter, QPointF center, double radius,
+                    double startAngleDeg, double spanAngleDeg, double strokeWidth, 
+                    QColor color, QLinearGradient* gradient = nullptr);
 
     PanelConfig m_config;
 };

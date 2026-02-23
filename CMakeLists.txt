@@ -115,6 +115,7 @@ set(SOURCES
     src/overlay/panels/MiniMapPanel.cpp
     src/overlay/panels/DistancePanel.cpp
     src/overlay/panels/LapPanel.cpp
+    src/overlay/panels/InclinationPanel.cpp
     src/timeline/TimelineModel.cpp
     src/timeline/TimelineWidget.cpp
     src/timeline/Track.cpp
@@ -151,6 +152,7 @@ set(HEADERS
     src/overlay/panels/MiniMapPanel.h
     src/overlay/panels/DistancePanel.h
     src/overlay/panels/LapPanel.h
+    src/overlay/panels/InclinationPanel.h
     src/timeline/TimelineModel.h
     src/timeline/TimelineWidget.h
     src/timeline/Track.h

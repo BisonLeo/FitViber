@@ -42,3 +42,56 @@ void OverlayPanel::paintValue(QPainter& painter, const QRect& rect,
     QString text = unit.isEmpty() ? value : QString("%1 %2").arg(value, unit);
     painter.drawText(valueRect, Qt::AlignLeft | Qt::AlignVCenter, text);
 }
+
+double OverlayPanel::drawSvgText(QPainter& painter, QPointF baselinePos, const QString& text, 
+                               double fontSize, QColor color, Qt::Alignment align, bool isBold) {
+    QFont font("Segoe UI", qMax(1, qRound(fontSize)));
+    if (isBold || fontSize > 30) font.setWeight(QFont::Bold);
+    else if (fontSize > 20) font.setWeight(QFont::DemiBold);
+    else font.setWeight(QFont::Normal);
+    
+    painter.setFont(font);
+    QFontMetrics fm(font);
+    double advance = fm.horizontalAdvance(text);
+    
+    double x = baselinePos.x();
+    double y = baselinePos.y();
+    
+    if (align & Qt::AlignRight) {
+        x -= advance;
+    } else if (align & Qt::AlignHCenter) {
+        x -= advance / 2.0;
+    }
+    
+    // Draw drop shadow
+    painter.setPen(QColor(0, 0, 0, 150));
+    painter.drawText(QPointF(x + 2, y + 2), text);
+    
+    // Draw main text
+    painter.setPen(color);
+    painter.drawText(QPointF(x, y), text);
+
+    return advance;
+}
+
+void OverlayPanel::drawSvgArc(QPainter& painter, QPointF center, double radius,
+                              double startAngleDeg, double spanAngleDeg, double strokeWidth, 
+                              QColor color, QLinearGradient* gradient) {
+    QRectF arcRect(center.x() - radius, center.y() - radius, radius * 2, radius * 2);
+    
+    QPen pen;
+    if (gradient) {
+        pen.setBrush(*gradient);
+    } else {
+        pen.setColor(color);
+    }
+    pen.setWidthF(strokeWidth);
+    pen.setCapStyle(Qt::RoundCap);
+    
+    painter.setPen(pen);
+    
+    // Qt drawArc takes angles in 1/16th of a degree
+    // Note: Qt's Y-axis grows downwards, but its angles go counter-clockwise (mathematical).
+    // SVG angles are usually clockwise because Y grows downwards. We pass raw Qt degrees.
+    painter.drawArc(arcRect, qRound(startAngleDeg * 16), qRound(spanAngleDeg * 16));
+}

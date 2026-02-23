@@ -12,6 +12,7 @@
 #include "FitTrack.h"
 #include "TimeSync.h"
 #include "VideoPlaybackEngine.h"
+#include "OverlayPanelFactory.h"
 
 #include <QMenuBar>
 #include <QMenu>
@@ -35,6 +36,13 @@ MainWindow::MainWindow(QWidget* parent)
     setupMenuBar();
     setupDockWidgets();
     connectSignals();
+
+    // Default Overlay Panels
+    m_overlayRenderer->addPanel(OverlayPanelFactory::create(PanelType::HeartRate, this));
+    m_overlayRenderer->addPanel(OverlayPanelFactory::create(PanelType::Distance, this));
+    m_overlayRenderer->addPanel(OverlayPanelFactory::create(PanelType::Elevation, this));
+    m_overlayRenderer->addPanel(OverlayPanelFactory::create(PanelType::Inclination, this));
+    m_overlayRenderer->addPanel(OverlayPanelFactory::create(PanelType::Speed, this));
 
     statusBar()->showMessage("Ready");
 }
@@ -239,7 +247,29 @@ void MainWindow::onPlaybackTick(double currentTime) {
 
         TimedFrame frame = m_playbackEngine->nextFrame();
         if (!frame.image.isNull()) {
-            m_previewWidget->displayFrame(frame.image);
+            QImage renderImage = frame.image.convertToFormat(QImage::Format_ARGB32);
+            renderImage.detach();
+
+            FitRecord rec;
+            FitSession sesh;
+            if (m_fitTrack && !m_fitTrack->isEmpty()) {
+                rec = m_fitTrack->getRecordAtTime(frame.pts + m_timeSync->fitTimeOffset());
+                sesh = m_fitTrack->session();
+            } else {
+                double loopTime = std::fmod(frame.pts, 10.0); // 10 second loop
+                double progress = loopTime / 10.0;
+                rec.speed = (progress * 200.0f) / 3.6f;
+                rec.distance = (progress * 100.0f) * 1000.0f;
+                rec.heartRate = progress * 200.0f;
+                rec.hasHeartRate = true;
+                rec.altitude = -100.0f + progress * 10100.0f;
+                rec.grade = -100.0f + progress * 200.0f;
+                sesh.records.push_back(rec);
+            }
+
+            m_overlayRenderer->render(renderImage, rec, sesh);
+            m_previewWidget->displayFrame(renderImage);
+            
             m_lastFramePts = frame.pts;
             m_previewWidget->setCurrentTime(frame.pts);
         } else if (m_playbackEngine->isFinished()) {
@@ -349,7 +379,29 @@ void MainWindow::onPlaybackTick(double currentTime) {
                 if (!frame.image.isNull()) break;
             }
             if (!frame.image.isNull()) {
-                m_previewWidget->displayFrame(frame.image);
+                QImage renderImage = frame.image.convertToFormat(QImage::Format_ARGB32);
+                renderImage.detach();
+                
+                FitRecord rec;
+                FitSession sesh;
+                if (m_fitTrack && !m_fitTrack->isEmpty()) {
+                    double absTime = m_timelineWidget->model()->relativeToAbsolute(currentTime);
+                    rec = m_fitTrack->getRecordAtTime(absTime + m_timeSync->fitTimeOffset());
+                    sesh = m_fitTrack->session();
+                } else {
+                    double loopTime = std::fmod(frame.pts, 10.0);
+                    double progress = loopTime / 10.0;
+                    rec.speed = (progress * 200.0f) / 3.6f;
+                    rec.distance = (progress * 100.0f) * 1000.0f;
+                    rec.heartRate = progress * 200.0f;
+                    rec.hasHeartRate = true;
+                    rec.altitude = -100.0f + progress * 10100.0f;
+                    rec.grade = -100.0f + progress * 200.0f;
+                    sesh.records.push_back(rec);
+                }
+
+                m_overlayRenderer->render(renderImage, rec, sesh);
+                m_previewWidget->displayFrame(renderImage);
                 m_lastFramePts = frame.pts;
             }
             m_previewWidget->setCurrentTime(currentTime);
@@ -360,7 +412,30 @@ void MainWindow::onPlaybackTick(double currentTime) {
 
     TimedFrame frame = m_playbackEngine->nextFrame();
     if (!frame.image.isNull()) {
-        m_previewWidget->displayFrame(frame.image);
+        QImage renderImage = frame.image.convertToFormat(QImage::Format_ARGB32);
+        renderImage.detach();
+        
+        FitRecord rec;
+        FitSession sesh;
+        if (m_fitTrack && !m_fitTrack->isEmpty()) {
+            double absTime = m_timelineWidget->model()->relativeToAbsolute(currentTime);
+            rec = m_fitTrack->getRecordAtTime(absTime + m_timeSync->fitTimeOffset());
+            sesh = m_fitTrack->session();
+        } else {
+            double loopTime = std::fmod(frame.pts, 10.0);
+            double progress = loopTime / 10.0;
+            rec.speed = (progress * 200.0f) / 3.6f;
+            rec.distance = (progress * 100.0f) * 1000.0f;
+            rec.heartRate = progress * 200.0f;
+            rec.hasHeartRate = true;
+            rec.altitude = -100.0f + progress * 10100.0f;
+            rec.grade = -100.0f + progress * 200.0f;
+            sesh.records.push_back(rec);
+        }
+
+        m_overlayRenderer->render(renderImage, rec, sesh);
+        m_previewWidget->displayFrame(renderImage);
+        
         m_lastFramePts = frame.pts;
     }
     
