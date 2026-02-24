@@ -1,21 +1,16 @@
 #include "PreviewWidget.h"
+#include "PreviewCanvas.h"
 #include "TimeUtil.h"
 #include <QVBoxLayout>
 #include <QHBoxLayout>
-#include <QMouseEvent>
 
 PreviewWidget::PreviewWidget(QWidget* parent) : QWidget(parent) {
     auto* mainLayout = new QVBoxLayout(this);
     mainLayout->setContentsMargins(0, 0, 0, 0);
 
     // Frame display
-    m_frameLabel = new QLabel(this);
-    m_frameLabel->setAlignment(Qt::AlignCenter);
-    m_frameLabel->setMinimumSize(320, 240);
-    m_frameLabel->setStyleSheet("background-color: #1e1e1e;");
-    m_frameLabel->setText("No Media");
-    m_frameLabel->installEventFilter(this);
-    mainLayout->addWidget(m_frameLabel, 1);
+    m_canvas = new PreviewCanvas(this);
+    mainLayout->addWidget(m_canvas, 1);
 
     // Controls bar
     m_controlsBar = new QWidget(this);
@@ -53,15 +48,16 @@ PreviewWidget::PreviewWidget(QWidget* parent) : QWidget(parent) {
         double time = m_duration * value / 10000.0;
         emit seekRequested(time);
     });
+
+    connect(m_canvas, &PreviewCanvas::clicked, this, &PreviewWidget::videoAreaClicked);
+    connect(m_canvas, &PreviewCanvas::transformChanged, this, &PreviewWidget::transformChanged);
 }
 
 PreviewWidget::~PreviewWidget() = default;
 
 void PreviewWidget::displayFrame(const QImage& frame) {
     m_currentFrame = frame;
-    QPixmap pixmap = QPixmap::fromImage(frame).scaled(
-        m_frameLabel->size(), Qt::KeepAspectRatio, Qt::SmoothTransformation);
-    m_frameLabel->setPixmap(pixmap);
+    m_canvas->setFrame(frame);
 }
 
 void PreviewWidget::setDuration(double seconds) {
@@ -90,20 +86,28 @@ void PreviewWidget::showImage(const QImage& image) {
 void PreviewWidget::showVideo() {
     m_videoMode = true;
     m_controlsBar->setVisible(true);
-    m_frameLabel->setText("");
 }
 
 void PreviewWidget::setPlayingState(bool playing) {
     m_playButton->setText(playing ? "\u23F8" : "\u25B6");
 }
 
-bool PreviewWidget::eventFilter(QObject* obj, QEvent* event) {
-    if (obj == m_frameLabel && event->type() == QEvent::MouseButtonPress) {
-        auto* me = static_cast<QMouseEvent*>(event);
-        if (me->button() == Qt::LeftButton && m_videoMode) {
-            emit videoAreaClicked();
-            return true;
-        }
-    }
-    return QWidget::eventFilter(obj, event);
+void PreviewWidget::setClipTransform(ClipTransform* transform) {
+    m_canvas->setTransform(transform);
+}
+
+void PreviewWidget::setHandlesVisible(bool visible) {
+    m_canvas->setHandlesVisible(visible);
+}
+
+void PreviewWidget::setCanvasSize(QSize canvasSize) {
+    m_canvas->setCanvasSize(canvasSize);
+}
+
+void PreviewWidget::setSourceSize(QSize sourceSize) {
+    m_canvas->setSourceSize(sourceSize);
+}
+
+void PreviewWidget::setComposited(bool composited) {
+    m_canvas->setComposited(composited);
 }

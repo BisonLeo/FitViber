@@ -2,9 +2,13 @@
 
 #include <QWidget>
 #include <QImage>
-#include <QLabel>
+#include <QSize>
 #include <QSlider>
 #include <QPushButton>
+#include <QLabel>
+
+class PreviewCanvas;
+struct ClipTransform;
 
 class PreviewWidget : public QWidget {
     Q_OBJECT
@@ -20,18 +24,22 @@ public:
     void showVideo();
     void setPlayingState(bool playing);
 
+    void setClipTransform(ClipTransform* transform);
+    void setHandlesVisible(bool visible);
+    void setCanvasSize(QSize canvasSize);
+    void setSourceSize(QSize sourceSize);
+    void setComposited(bool composited);
+
 signals:
     void playPauseClicked();
     void seekRequested(double seconds);
     void stepForward();
     void stepBackward();
     void videoAreaClicked();
-
-protected:
-    bool eventFilter(QObject* obj, QEvent* event) override;
+    void transformChanged();
 
 private:
-    QLabel* m_frameLabel;
+    PreviewCanvas* m_canvas;
     QWidget* m_controlsBar;
     QSlider* m_seekSlider;
     QPushButton* m_playButton;

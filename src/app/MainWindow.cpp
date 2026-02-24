@@ -22,6 +22,12 @@
 #include <QFileDialog>
 #include <QMessageBox>
 #include <QFileInfo>
+#include <QPainter>
+#include <QDialog>
+#include <QSpinBox>
+#include <QFormLayout>
+#include <QDialogButtonBox>
+#include <QtMath>
 
 MainWindow::MainWindow(QWidget* parent)
     : QMainWindow(parent)
@@ -46,6 +52,9 @@ MainWindow::MainWindow(QWidget* parent)
     m_overlayRenderer->addPanel(OverlayPanelFactory::create(PanelType::Inclination, this));
     m_overlayRenderer->addPanel(OverlayPanelFactory::create(PanelType::Speed, this));
     m_overlayRenderer->addPanel(OverlayPanelFactory::create(PanelType::MiniMap, this));
+
+    // Set initial canvas size on preview
+    m_previewWidget->setCanvasSize(m_canvasSize);
 
     statusBar()->showMessage("Ready");
 }
@@ -91,6 +100,11 @@ void MainWindow::setupMenuBar() {
 
     auto* viewMenu = menuBar()->addMenu("&View");
 
+    auto* canvasAction = viewMenu->addAction("Canvas &Settings...");
+    connect(canvasAction, &QAction::triggered, this, &MainWindow::onCanvasSettings);
+
+    viewMenu->addSeparator();
+
     auto* helpMenu = menuBar()->addMenu("&Help");
     auto* aboutAction = helpMenu->addAction("&About");
     connect(aboutAction, &QAction::triggered, this, [this]() {
@@ -99,8 +113,6 @@ void MainWindow::setupMenuBar() {
                     "<p>GPS activity overlay video editor.</p>")
             .arg(AppConstants::AppVersion));
     });
-
-    Q_UNUSED(viewMenu);
 }
 
 void MainWindow::setupDockWidgets() {
@@ -120,13 +132,11 @@ void MainWindow::setupDockWidgets() {
     addDockWidget(Qt::BottomDockWidgetArea, m_timelineDock);
 
     // Add toggle actions to View menu
-    auto* viewMenu = menuBar()->findChild<QMenu*>(QString(), Qt::FindDirectChildrenOnly);
-    if (!viewMenu) {
-        for (auto* action : menuBar()->actions()) {
-            if (action->text() == "&View") {
-                viewMenu = action->menu();
-                break;
-            }
+    QMenu* viewMenu = nullptr;
+    for (auto* action : menuBar()->actions()) {
+        if (action->text() == "&View") {
+            viewMenu = action->menu();
+            break;
         }
     }
     if (viewMenu) {
@@ -183,18 +193,19 @@ void MainWindow::connectSignals() {
             this, &MainWindow::onTimelineSeek);
     connect(m_timelineWidget, &TimelineWidget::playheadScrubbed,
             this, &MainWindow::onTimelineScrub);
-            
-        connect(m_timelineWidget, &TimelineWidget::clipAdded, this, [this](const QString& path, double offset, double dur) {
-            if (QFileInfo(path).suffix().toLower() == "fit") {
-                FitParser parser;
-                if (parser.parse(path)) {
-                    if (!m_timelineFitTrack) m_timelineFitTrack = std::make_unique<FitTrack>();
-                    m_timelineFitTrack->appendSession(parser.session());
-    
-                    // For TimeSync offset logic, we just set it based on the first clip added to help the generic TimeSync
-                    if (m_timelineFitTrack->records().size() == parser.session().records.size()) {
-                        m_timeSync->setFitTimeOffset(parser.session().startTime - offset);
-                    }            }
+
+    connect(m_timelineWidget, &TimelineWidget::clipAdded, this, [this](const QString& path, double offset, double dur) {
+        if (QFileInfo(path).suffix().toLower() == "fit") {
+            FitParser parser;
+            if (parser.parse(path)) {
+                if (!m_timelineFitTrack) m_timelineFitTrack = std::make_unique<FitTrack>();
+                m_timelineFitTrack->appendSession(parser.session());
+
+                // For TimeSync offset logic, we just set it based on the first clip added to help the generic TimeSync
+                if (m_timelineFitTrack->records().size() == parser.session().records.size()) {
+                    m_timeSync->setFitTimeOffset(parser.session().startTime - offset);
+                }
+            }
         }
     });
 
@@ -202,7 +213,7 @@ void MainWindow::connectSignals() {
         auto* track = m_timelineWidget->model()->track(trackIndex);
         if (track && track->type() == TrackType::FitData) {
             const Clip& clip = track->clips()[clipIndex];
-            if (clipIndex == 0) { 
+            if (clipIndex == 0) {
                 m_timeSync->setFitTimeOffset(clip.absoluteStartTime - newOffset);
             }
             if (m_playbackFromTimeline && m_playbackController->state() != PlaybackState::Playing) {
@@ -210,6 +221,64 @@ void MainWindow::connectSignals() {
             }
         }
     });
+
+    // Clip selection → transform handles
+    connect(m_timelineWidget, &TimelineWidget::clipSelectionChanged,
+            this, &MainWindow::onClipSelectionChanged);
+
+    // Preview transform changed → re-render + update properties labels
+    connect(m_previewWidget, &PreviewWidget::transformChanged, this, [this]() {
+        m_propertiesPanel->updateTransformLabels();
+        if (m_playbackFromTimeline) {
+            onPlaybackTick(m_timelineWidget->model()->playheadPosition());
+        }
+    });
+
+    // Properties transform changed → re-render + update preview
+    connect(m_propertiesPanel, &PropertiesPanel::transformChanged, this, [this]() {
+        m_previewWidget->update();
+        if (m_playbackFromTimeline) {
+            onPlaybackTick(m_timelineWidget->model()->playheadPosition());
+        }
+    });
+}
+
+void MainWindow::onCanvasSettings() {
+    QDialog dlg(this);
+    dlg.setWindowTitle("Canvas Settings");
+
+    auto* layout = new QFormLayout(&dlg);
+
+    auto* widthSpin = new QSpinBox(&dlg);
+    widthSpin->setRange(320, 7680);
+    widthSpin->setValue(m_canvasSize.width());
+    widthSpin->setSuffix(" px");
+    layout->addRow("Width:", widthSpin);
+
+    auto* heightSpin = new QSpinBox(&dlg);
+    heightSpin->setRange(240, 4320);
+    heightSpin->setValue(m_canvasSize.height());
+    heightSpin->setSuffix(" px");
+    layout->addRow("Height:", heightSpin);
+
+    auto* buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dlg);
+    layout->addRow(buttons);
+
+    connect(buttons, &QDialogButtonBox::accepted, &dlg, &QDialog::accept);
+    connect(buttons, &QDialogButtonBox::rejected, &dlg, &QDialog::reject);
+
+    if (dlg.exec() == QDialog::Accepted) {
+        m_canvasSize = QSize(widthSpin->value(), heightSpin->value());
+        m_previewWidget->setCanvasSize(m_canvasSize);
+
+        // Re-render current frame if in timeline mode
+        if (m_playbackFromTimeline) {
+            onPlaybackTick(m_timelineWidget->model()->playheadPosition());
+        }
+
+        statusBar()->showMessage(QString("Canvas size set to %1x%2")
+            .arg(m_canvasSize.width()).arg(m_canvasSize.height()));
+    }
 }
 
 void MainWindow::onMediaSelected(const QString& path) {
@@ -228,6 +297,8 @@ void MainWindow::onMediaSelected(const QString& path) {
 
         QImage img(path);
         if (!img.isNull()) {
+            m_previewWidget->setComposited(false);
+            m_previewWidget->setSourceSize(img.size());
             m_previewWidget->showImage(img);
             statusBar()->showMessage(QString("Showing image: %1").arg(info.fileName()));
         } else {
@@ -256,6 +327,8 @@ void MainWindow::onMediaSelected(const QString& path) {
     m_playbackController->setDuration(vi.duration > 0 ? vi.duration * 10.0 : 3600.0);
     m_lastFramePts = 0.0;
 
+    m_previewWidget->setComposited(false);
+    m_previewWidget->setSourceSize(QSize(vi.width, vi.height));
     m_previewWidget->showVideo();
 
     // Show first frame — pull from decode queue (give decode thread a moment)
@@ -279,10 +352,11 @@ void MainWindow::onMediaSelected(const QString& path) {
 void MainWindow::onPlaybackTick(double currentTime) {
     if (!m_playbackFromTimeline) {
         if (m_previewFitData) {
-            QImage renderImage(1920, 1080, QImage::Format_ARGB32);
+            QImage renderImage(m_canvasSize, QImage::Format_ARGB32);
             renderImage.fill(Qt::black);
 
             renderOverlay(renderImage, currentTime);
+            m_previewWidget->setComposited(true);
             m_previewWidget->displayFrame(renderImage);
 
             m_lastFramePts = currentTime;
@@ -305,108 +379,134 @@ void MainWindow::onPlaybackTick(double currentTime) {
         } else if (m_playbackEngine->isFinished()) {
             m_playbackController->pause();
             m_previewWidget->setDuration(m_lastFramePts);
-            m_previewWidget->setCurrentTime(m_lastFramePts);       
+            m_previewWidget->setCurrentTime(m_lastFramePts);
         }
         return;
     }
     // --- TIMELINE PREVIEW MODE ---
     m_timelineWidget->model()->setPlayheadPosition(currentTime);
-    
+
     double dur = m_timelineWidget->model()->duration();
     if (dur > 0) {
         m_playbackController->setDuration(dur);
         m_previewWidget->setDuration(dur);
     }
 
-        // Find clip at currentTime
-        auto* model = m_timelineWidget->model();
-        const Clip* currentVisualClip = nullptr;
-        const Clip* currentFitClip = nullptr;
-    
-        for (int ti = 0; ti < model->trackCount(); ++ti) {
-            Track* track = model->track(ti);
-            if (!track) continue;
-            for (const auto& clip : track->clips()) {
-                if (currentTime >= clip.timelineOffset && currentTime < clip.timelineOffset + clip.duration()) {
-                    if (track->type() == TrackType::FitData && !currentFitClip) {
-                        currentFitClip = &clip;
-                                    } else if ((track->type() == TrackType::Video) && !currentVisualClip) {
-                                        currentVisualClip = &clip;
-                                    }                }
+    // Find clip at currentTime
+    auto* model = m_timelineWidget->model();
+    const Clip* currentVisualClip = nullptr;
+    const Clip* currentFitClip = nullptr;
+
+    for (int ti = 0; ti < model->trackCount(); ++ti) {
+        Track* track = model->track(ti);
+        if (!track) continue;
+        for (const auto& clip : track->clips()) {
+            if (currentTime >= clip.timelineOffset && currentTime < clip.timelineOffset + clip.duration()) {
+                if (track->type() == TrackType::FitData && !currentFitClip) {
+                    currentFitClip = &clip;
+                } else if ((track->type() == TrackType::Video) && !currentVisualClip) {
+                    currentVisualClip = &clip;
+                }
             }
         }
-    
-        if (!currentVisualClip) {
-            // No visual clip: render black screen, but still apply overlay
-            if (m_playbackEngine->isOpen()) {
-                m_playbackEngine->close();
-            }
-            m_currentClipPath.clear();
-            m_lastSourceTime = -1.0;
-    
-            QSize s = m_previewWidget->size();
-            if (!s.isValid() || s.width() < 1) s = QSize(1280, 720);   
-            QImage blackFrame(s, QImage::Format_ARGB32);
-            blackFrame.fill(Qt::black);
-            
-            renderOverlay(blackFrame, currentTime);
-            
-            m_previewWidget->showVideo();
-            m_previewWidget->displayFrame(blackFrame);
-            m_previewWidget->setCurrentTime(currentTime);
-            return;
-        }
-    
-        if (currentVisualClip->type == ClipType::Image) {
-            if (m_currentClipPath != currentVisualClip->sourcePath) {
-                if (m_playbackEngine->isOpen()) m_playbackEngine->close();
-                m_currentClipPath = currentVisualClip->sourcePath;
-            }
-            QImage img(m_currentClipPath);
-            if (!img.isNull()) {
-                img = img.convertToFormat(QImage::Format_ARGB32);
-                renderOverlay(img, currentTime);
-                m_previewWidget->showVideo(); // Using showVideo allows us to display composited frames
-                m_previewWidget->displayFrame(img);
-            }
-            m_previewWidget->setCurrentTime(currentTime);
-            m_lastSourceTime = -1.0;
-            return;
-        }
-    
-        // Video clip
-        m_previewWidget->showVideo();
-        double sourceTime = currentTime - currentVisualClip->timelineOffset + currentVisualClip->sourceIn;
-    
-        bool justOpened = false;
-        if (m_currentClipPath != currentVisualClip->sourcePath || !m_playbackEngine->isOpen()) {
+    }
+
+    if (!currentVisualClip) {
+        // No visual clip: render black canvas, but still apply overlay
+        if (m_playbackEngine->isOpen()) {
             m_playbackEngine->close();
-            if (m_playbackEngine->open(currentVisualClip->sourcePath)) {
-                m_currentClipPath = currentVisualClip->sourcePath;
-                justOpened = true;
-                double fps = m_playbackEngine->info().fps;
-                if (fps > 0) m_playbackController->setFps(fps);        
-            } else {
-                m_currentClipPath.clear();
-                return;
-            }
         }
+        m_currentClipPath.clear();
+        m_lastSourceTime = -1.0;
+
+        QImage blackFrame(m_canvasSize, QImage::Format_ARGB32);
+        blackFrame.fill(Qt::black);
+
+        renderOverlay(blackFrame, currentTime);
+
+        m_previewWidget->setComposited(true);
+        m_previewWidget->setSourceSize(QSize());
+        m_previewWidget->showVideo();
+        m_previewWidget->displayFrame(blackFrame);
+        m_previewWidget->setCurrentTime(currentTime);
+        return;
+    }
+
+    // Helper lambda: compose a source frame onto the canvas with the clip's transform
+    auto composeFrame = [this](const QImage& source, const ClipTransform& transform) -> QImage {
+        QImage canvas(m_canvasSize, QImage::Format_ARGB32);
+        canvas.fill(Qt::black);
+        QPainter painter(&canvas);
+        painter.setRenderHint(QPainter::SmoothPixmapTransform);
+
+        QPointF center(canvas.width() / 2.0, canvas.height() / 2.0);
+        painter.translate(center + QPointF(transform.panX, transform.panY));
+        painter.rotate(transform.rotation);
+        double sx = transform.flipH ? -transform.scale : transform.scale;
+        double sy = transform.flipV ? -transform.scale : transform.scale;
+        painter.scale(sx, sy);
+        // Draw source centered
+        painter.drawImage(QPointF(-source.width() / 2.0, -source.height() / 2.0), source);
+        painter.end();
+
+        return canvas;
+    };
+
+    if (currentVisualClip->type == ClipType::Image) {
+        if (m_currentClipPath != currentVisualClip->sourcePath) {
+            if (m_playbackEngine->isOpen()) m_playbackEngine->close();
+            m_currentClipPath = currentVisualClip->sourcePath;
+        }
+        QImage img(m_currentClipPath);
+        if (!img.isNull()) {
+            img = img.convertToFormat(QImage::Format_ARGB32);
+            QImage composited = composeFrame(img, currentVisualClip->transform);
+            renderOverlay(composited, currentTime);
+            m_previewWidget->setComposited(true);
+            m_previewWidget->setSourceSize(img.size());
+            m_previewWidget->showVideo();
+            m_previewWidget->displayFrame(composited);
+        }
+        m_previewWidget->setCurrentTime(currentTime);
+        m_lastSourceTime = -1.0;
+        return;
+    }
+
+    // Video clip
+    m_previewWidget->showVideo();
+    double sourceTime = currentTime - currentVisualClip->timelineOffset + currentVisualClip->sourceIn;
+
+    bool justOpened = false;
+    if (m_currentClipPath != currentVisualClip->sourcePath || !m_playbackEngine->isOpen()) {
+        m_playbackEngine->close();
+        if (m_playbackEngine->open(currentVisualClip->sourcePath)) {
+            m_currentClipPath = currentVisualClip->sourcePath;
+            justOpened = true;
+            double fps = m_playbackEngine->info().fps;
+            if (fps > 0) m_playbackController->setFps(fps);
+        } else {
+            m_currentClipPath.clear();
+            return;
+        }
+    }
+
     // Seek if necessary (scrubbed, opened, paused, or discontinuous time)
     bool continuous = true;
     if (m_lastSourceTime >= 0.0) {
-        // If sourceTime jumped by a noticeable amount instead of advancing sequentially
         if (std::abs(sourceTime - m_lastSourceTime) > 0.5) {
             continuous = false;
         }
     }
 
-    bool shouldSeek = justOpened || m_forceTimelineSeek || !continuous || 
+    bool shouldSeek = justOpened || m_forceTimelineSeek || !continuous ||
                       m_playbackController->state() != PlaybackState::Playing;
+
+    QSize srcSize(m_playbackEngine->info().width, m_playbackEngine->info().height);
 
     if (shouldSeek) {
         m_playbackEngine->seek(sourceTime);
         m_forceTimelineSeek = false;
-        
+
         // When not playing, block briefly to grab a frame so the UI updates during scrub
         if (m_playbackController->state() != PlaybackState::Playing) {
             TimedFrame frame;
@@ -416,13 +516,15 @@ void MainWindow::onPlaybackTick(double currentTime) {
                 if (!frame.image.isNull()) break;
             }
             if (!frame.image.isNull()) {
-                                QImage renderImage = frame.image.convertToFormat(QImage::Format_ARGB32);
-                                renderImage.detach();
-                
-                                renderOverlay(renderImage, currentTime);
-                                
-                                m_previewWidget->displayFrame(renderImage);
-                                m_lastFramePts = frame.pts;            }
+                QImage renderImage = frame.image.convertToFormat(QImage::Format_ARGB32);
+                renderImage.detach();
+                QImage composited = composeFrame(renderImage, currentVisualClip->transform);
+                renderOverlay(composited, currentTime);
+                m_previewWidget->setComposited(true);
+                m_previewWidget->setSourceSize(srcSize);
+                m_previewWidget->displayFrame(composited);
+                m_lastFramePts = frame.pts;
+            }
             m_previewWidget->setCurrentTime(currentTime);
             m_lastSourceTime = sourceTime;
             return;
@@ -431,14 +533,16 @@ void MainWindow::onPlaybackTick(double currentTime) {
 
     TimedFrame frame = m_playbackEngine->nextFrame();
     if (!frame.image.isNull()) {
-                QImage renderImage = frame.image.convertToFormat(QImage::Format_ARGB32);
-                renderImage.detach();
-        
-                renderOverlay(renderImage, currentTime);
-                m_previewWidget->displayFrame(renderImage);
-        
-                m_lastFramePts = frame.pts;    }
-    
+        QImage renderImage = frame.image.convertToFormat(QImage::Format_ARGB32);
+        renderImage.detach();
+        QImage composited = composeFrame(renderImage, currentVisualClip->transform);
+        renderOverlay(composited, currentTime);
+        m_previewWidget->setComposited(true);
+        m_previewWidget->setSourceSize(srcSize);
+        m_previewWidget->displayFrame(composited);
+        m_lastFramePts = frame.pts;
+    }
+
     m_previewWidget->setCurrentTime(currentTime);
     m_lastSourceTime = sourceTime;
 }
@@ -453,7 +557,7 @@ void MainWindow::renderOverlay(QImage& frame, double currentTime) {
     FitSession dummySesh; // Used only if hasFitData is false
 
     bool hasFitData = false;
-    
+
     if (m_playbackFromTimeline) {
         // Find if there is a FitData clip at this time
         const Clip* currentFitClip = nullptr;
@@ -472,14 +576,12 @@ void MainWindow::renderOverlay(QImage& frame, double currentTime) {
 
         if (currentFitClip && m_timelineFitTrack && !m_timelineFitTrack->isEmpty()) {
             double sourceTime = currentTime - currentFitClip->timelineOffset + currentFitClip->absoluteStartTime;
-            // The timeline offset visually controls sync, no need for the global TimeSync offset here
             rec = m_timelineFitTrack->getRecordAtTime(sourceTime);
             sessionToRender = &m_timelineFitTrack->session();
             hasFitData = true;
         }
     } else {
         if (m_previewFitTrack && !m_previewFitTrack->isEmpty()) {
-            // For standalone preview
             double searchTime = m_previewFitData ? currentTime + m_previewFitTrack->startTime() : currentTime + m_timeSync->fitTimeOffset();
             rec = m_previewFitTrack->getRecordAtTime(searchTime);
             sessionToRender = &m_previewFitTrack->session();
@@ -488,7 +590,7 @@ void MainWindow::renderOverlay(QImage& frame, double currentTime) {
     }
 
     if (!hasFitData) {
-        return; // Do not render overlay if there's no fit data
+        return;
     }
 
     m_overlayRenderer->render(frame, rec, *sessionToRender);
@@ -500,13 +602,13 @@ void MainWindow::onTimelineScrub(double relativeSeconds) {
         m_playbackController->stop();
         if (m_playbackEngine->isOpen()) m_playbackEngine->close();
     }
-    
+
     double dur = m_timelineWidget->model()->duration();
     if (dur > 0) {
         m_playbackController->setDuration(dur);
         m_previewWidget->setDuration(dur);
     }
-    
+
     m_playbackController->seek(relativeSeconds);
 }
 
@@ -515,30 +617,81 @@ void MainWindow::onFitFileOpened(const QString& path) {
 
     FitParser parser;
     if (parser.parse(path)) {
-                if (!m_previewFitTrack) {
-                    m_previewFitTrack = std::make_unique<FitTrack>();
-                }
-                m_previewFitTrack->loadSession(parser.session());
-                statusBar()->showMessage(QString("Loaded FIT file: %1 (Records: %2)").arg(QFileInfo(path).fileName()).arg(m_previewFitTrack->records().size()));
-        
-                m_playbackFromTimeline = false;  // must be before stop() to prevent timeline playhead reset
-                m_playbackController->stop();
-                m_playbackEngine->close();
+        if (!m_previewFitTrack) {
+            m_previewFitTrack = std::make_unique<FitTrack>();
+        }
+        m_previewFitTrack->loadSession(parser.session());
+        statusBar()->showMessage(QString("Loaded FIT file: %1 (Records: %2)").arg(QFileInfo(path).fileName()).arg(m_previewFitTrack->records().size()));
 
-                m_previewFitData = true;
-                m_currentClipPath = path;
-        
-                m_playbackController->setFps(30.0);
-                m_playbackController->setDuration(m_previewFitTrack->duration()); 
-                m_lastFramePts = 0.0;
-        
-                m_previewWidget->showVideo();
-                m_previewWidget->setDuration(m_previewFitTrack->duration());        
+        m_playbackFromTimeline = false;  // must be before stop() to prevent timeline playhead reset
+        m_playbackController->stop();
+        m_playbackEngine->close();
+
+        m_previewFitData = true;
+        m_currentClipPath = path;
+
+        m_playbackController->setFps(30.0);
+        m_playbackController->setDuration(m_previewFitTrack->duration());
+        m_lastFramePts = 0.0;
+
+        m_previewWidget->setComposited(true);
+        m_previewWidget->setSourceSize(QSize());
+        m_previewWidget->showVideo();
+        m_previewWidget->setDuration(m_previewFitTrack->duration());
         // Force an update to show the first frame
         onPlaybackTick(0.0);
     } else {
         statusBar()->showMessage(QString("Failed to parse FIT file: %1").arg(parser.errorString()));
     }
+}
+
+void MainWindow::onClipSelectionChanged(int trackIndex, int clipIndex) {
+    if (trackIndex < 0 || clipIndex < 0) {
+        m_previewWidget->setClipTransform(nullptr);
+        m_previewWidget->setHandlesVisible(false);
+        m_propertiesPanel->setClipTransform(nullptr);
+        return;
+    }
+
+    auto* track = m_timelineWidget->model()->track(trackIndex);
+    if (!track || clipIndex >= track->clipCount()) {
+        m_previewWidget->setClipTransform(nullptr);
+        m_previewWidget->setHandlesVisible(false);
+        m_propertiesPanel->setClipTransform(nullptr);
+        return;
+    }
+
+    Clip& clip = track->clips()[clipIndex];
+    if (clip.type == ClipType::Video || clip.type == ClipType::Image) {
+        m_previewWidget->setClipTransform(&clip.transform);
+        m_previewWidget->setHandlesVisible(true);
+        m_propertiesPanel->setClipTransform(&clip.transform);
+    } else {
+        m_previewWidget->setClipTransform(nullptr);
+        m_previewWidget->setHandlesVisible(false);
+        m_propertiesPanel->setClipTransform(nullptr);
+    }
+}
+
+QImage MainWindow::applyTransform(const QImage& source, const ClipTransform& transform) {
+    if (transform.isIdentity()) return source;
+
+    QImage canvas(m_canvasSize, QImage::Format_ARGB32);
+    canvas.fill(Qt::black);
+
+    QPainter painter(&canvas);
+    painter.setRenderHint(QPainter::SmoothPixmapTransform);
+
+    QPointF center(canvas.width() / 2.0, canvas.height() / 2.0);
+    painter.translate(center + QPointF(transform.panX, transform.panY));
+    painter.rotate(transform.rotation);
+    double sx = transform.flipH ? -transform.scale : transform.scale;
+    double sy = transform.flipV ? -transform.scale : transform.scale;
+    painter.scale(sx, sy);
+    painter.drawImage(QPointF(-source.width() / 2.0, -source.height() / 2.0), source);
+    painter.end();
+
+    return canvas;
 }
 
 void MainWindow::onExportRequested() {

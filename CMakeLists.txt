@@ -122,6 +122,7 @@ set(SOURCES
     src/timeline/TimeSync.cpp
     src/ui/MediaBrowser.cpp
     src/ui/PreviewWidget.cpp
+    src/ui/PreviewCanvas.cpp
     src/ui/PropertiesPanel.cpp
     src/ui/PlaybackController.cpp
     src/ui/DarkTheme.cpp
@@ -157,9 +158,11 @@ set(HEADERS
     src/timeline/TimelineWidget.h
     src/timeline/Track.h
     src/timeline/Clip.h
+    src/timeline/ClipTransform.h
     src/timeline/TimeSync.h
     src/ui/MediaBrowser.h
     src/ui/PreviewWidget.h
+    src/ui/PreviewCanvas.h
     src/ui/PropertiesPanel.h
     src/ui/PlaybackController.h
     src/ui/DarkTheme.h

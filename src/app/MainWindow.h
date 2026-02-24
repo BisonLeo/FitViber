@@ -2,6 +2,7 @@
 
 #include <QMainWindow>
 #include <QDockWidget>
+#include <QSize>
 #include <memory>
 
 class MediaBrowser;
@@ -13,6 +14,7 @@ class OverlayRenderer;
 class FitTrack;
 class TimeSync;
 class VideoPlaybackEngine;
+struct ClipTransform;
 
 class MainWindow : public QMainWindow {
     Q_OBJECT
@@ -27,6 +29,8 @@ private slots:
     void onPlaybackTick(double currentTime);
     void onTimelineSeek(double relativeSeconds);
     void onTimelineScrub(double relativeSeconds);
+    void onClipSelectionChanged(int trackIndex, int clipIndex);
+    void onCanvasSettings();
 
 private:
     void setupUi();
@@ -34,6 +38,7 @@ private:
     void setupDockWidgets();
     void connectSignals();
     void renderOverlay(QImage& frame, double currentTime);
+    QImage applyTransform(const QImage& source, const ClipTransform& transform);
 
     QDockWidget* m_mediaDock = nullptr;
     QDockWidget* m_propertiesDock = nullptr;
@@ -57,4 +62,6 @@ private:
     bool m_previewFitData = false; // true if previewing a standalone FIT file without video
     bool m_forceTimelineSeek = false; // flag to trigger seek when playing from timeline
     double m_lastSourceTime = -1.0; // previous tick's source time
+
+    QSize m_canvasSize{1920, 1080}; // output canvas dimensions
 };

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <QString>
+#include "ClipTransform.h"
 
 enum class ClipType {
     Video,
@@ -18,6 +19,7 @@ struct Clip {
     double timelineOffset = 0.0;  // position on timeline (relative to time origin)
     double absoluteStartTime = 0.0;  // Unix timestamp of clip start
     bool locked = false;              // locked clips cannot be moved
+    ClipTransform transform;
 
     double duration() const { return sourceOut - sourceIn; }
 };

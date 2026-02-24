@@ -293,10 +293,9 @@ void TimelineWidget::deleteSelectedClips() {
     }
 
     m_selectedClips.clear();
+    emit clipSelectionChanged(-1, -1);
     update();
 }
-
-// --- Paint ---
 
 void TimelineWidget::paintEvent(QPaintEvent*) {
     QPainter painter(this);
@@ -518,7 +517,18 @@ void TimelineWidget::mousePressEvent(QMouseEvent* event) {
         }
     } else {
         // Clicked empty area → deselect all
-        m_selectedClips.clear();
+        if (!m_selectedClips.isEmpty()) {
+            m_selectedClips.clear();
+            emit clipSelectionChanged(-1, -1);
+        }
+    }
+
+    // Emit selection signal for single-selected clip
+    if (m_selectedClips.size() == 1) {
+        auto sel = *m_selectedClips.constBegin();
+        emit clipSelectionChanged(sel.first, sel.second);
+    } else if (m_selectedClips.size() > 1) {
+        emit clipSelectionChanged(-1, -1); // multi-select: no single clip
     }
 
     update();
