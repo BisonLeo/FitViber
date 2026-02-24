@@ -17,7 +17,8 @@ public:
     int trackCount() const { return static_cast<int>(m_tracks.size()); }
     Track* track(int index);
 
-    double duration() const;
+    double duration() const;   // max end time across all clips
+    double minTime() const;    // min start time across all clips
     double playheadPosition() const { return m_playhead; }
     void setPlayheadPosition(double seconds);
 

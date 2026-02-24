@@ -52,6 +52,9 @@ private:
     QPixmap generateFitThumbnail(const QString& path);
     MediaType classifyFile(const QString& suffix) const;
 
+    void drawInfoText(QPainter& painter, const QRect& rect,
+                      const QString& text, Qt::Alignment align);
+
     MediaBrowserListWidget* m_listWidget;
     QPushButton* m_importButton;
     QStringList m_mediaPaths;

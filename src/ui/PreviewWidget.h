@@ -18,6 +18,7 @@ public:
 
     void displayFrame(const QImage& frame);
     void setDuration(double seconds);
+    void setStartTime(double seconds);
     void setCurrentTime(double seconds);
 
     void showImage(const QImage& image);
@@ -47,6 +48,7 @@ private:
     QPushButton* m_stepForwardButton;
     QLabel* m_timeLabel;
 
+    double m_startTime = 0.0;
     double m_duration = 0.0;
     QImage m_currentFrame;
     bool m_videoMode = false;

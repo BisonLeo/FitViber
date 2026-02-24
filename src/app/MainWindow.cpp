@@ -32,7 +32,6 @@
 MainWindow::MainWindow(QWidget* parent)
     : QMainWindow(parent)
     , m_overlayRenderer(std::make_unique<OverlayRenderer>())
-    , m_timelineFitTrack(std::make_unique<FitTrack>())
     , m_previewFitTrack(std::make_unique<FitTrack>())
     , m_timeSync(std::make_unique<TimeSync>())
     , m_playbackEngine(std::make_unique<VideoPlaybackEngine>())
@@ -124,6 +123,7 @@ void MainWindow::setupDockWidgets() {
     m_propertiesDock = new QDockWidget("Properties", this);
     m_propertiesDock->setWidget(m_propertiesPanel);
     m_propertiesDock->setObjectName("PropertiesDock");
+    m_propertiesPanel->setMinimumWidth(220);
     addDockWidget(Qt::RightDockWidgetArea, m_propertiesDock);
 
     m_timelineDock = new QDockWidget("Timeline", this);
@@ -198,11 +198,12 @@ void MainWindow::connectSignals() {
         if (QFileInfo(path).suffix().toLower() == "fit") {
             FitParser parser;
             if (parser.parse(path)) {
-                if (!m_timelineFitTrack) m_timelineFitTrack = std::make_unique<FitTrack>();
-                m_timelineFitTrack->appendSession(parser.session());
+                auto fitTrack = std::make_unique<FitTrack>();
+                fitTrack->loadSession(parser.session());
+                m_fitTracks[path] = std::move(fitTrack);
 
-                // For TimeSync offset logic, we just set it based on the first clip added to help the generic TimeSync
-                if (m_timelineFitTrack->records().size() == parser.session().records.size()) {
+                // For TimeSync offset logic, set based on the first FIT clip added
+                if (m_fitTracks.size() == 1) {
                     m_timeSync->setFitTimeOffset(parser.session().startTime - offset);
                 }
             }
@@ -216,9 +217,20 @@ void MainWindow::connectSignals() {
             if (clipIndex == 0) {
                 m_timeSync->setFitTimeOffset(clip.absoluteStartTime - newOffset);
             }
-            if (m_playbackFromTimeline && m_playbackController->state() != PlaybackState::Playing) {
-                onPlaybackTick(m_timelineWidget->model()->playheadPosition());
-            }
+        }
+
+        // Update playback controller bounds after any clip move
+        double dur = m_timelineWidget->model()->duration();
+        double minT = m_timelineWidget->model()->minTime();
+        if (dur > minT) {
+            m_playbackController->setStartTime(minT);
+            m_playbackController->setDuration(dur);
+            m_previewWidget->setStartTime(minT);
+            m_previewWidget->setDuration(dur);
+        }
+
+        if (m_playbackFromTimeline && m_playbackController->state() != PlaybackState::Playing) {
+            onPlaybackTick(m_timelineWidget->model()->playheadPosition());
         }
     });
 
@@ -387,8 +399,11 @@ void MainWindow::onPlaybackTick(double currentTime) {
     m_timelineWidget->model()->setPlayheadPosition(currentTime);
 
     double dur = m_timelineWidget->model()->duration();
-    if (dur > 0) {
+    double minT = m_timelineWidget->model()->minTime();
+    if (dur > minT) {
+        m_playbackController->setStartTime(minT);
         m_playbackController->setDuration(dur);
+        m_previewWidget->setStartTime(minT);
         m_previewWidget->setDuration(dur);
     }
 
@@ -574,11 +589,14 @@ void MainWindow::renderOverlay(QImage& frame, double currentTime) {
             if (currentFitClip) break;
         }
 
-        if (currentFitClip && m_timelineFitTrack && !m_timelineFitTrack->isEmpty()) {
-            double sourceTime = currentTime - currentFitClip->timelineOffset + currentFitClip->absoluteStartTime;
-            rec = m_timelineFitTrack->getRecordAtTime(sourceTime);
-            sessionToRender = &m_timelineFitTrack->session();
-            hasFitData = true;
+        if (currentFitClip) {
+            auto it = m_fitTracks.find(currentFitClip->sourcePath);
+            if (it != m_fitTracks.end() && it->second && !it->second->isEmpty()) {
+                double sourceTime = currentTime - currentFitClip->timelineOffset + currentFitClip->absoluteStartTime;
+                rec = it->second->getRecordAtTime(sourceTime);
+                sessionToRender = &it->second->session();
+                hasFitData = true;
+            }
         }
     } else {
         if (m_previewFitTrack && !m_previewFitTrack->isEmpty()) {
@@ -604,8 +622,11 @@ void MainWindow::onTimelineScrub(double relativeSeconds) {
     }
 
     double dur = m_timelineWidget->model()->duration();
-    if (dur > 0) {
+    double minT = m_timelineWidget->model()->minTime();
+    if (dur > minT) {
+        m_playbackController->setStartTime(minT);
         m_playbackController->setDuration(dur);
+        m_previewWidget->setStartTime(minT);
         m_previewWidget->setDuration(dur);
     }
 

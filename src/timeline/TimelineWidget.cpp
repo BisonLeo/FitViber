@@ -17,6 +17,7 @@
 #include <QFileInfo>
 #include <QUrl>
 #include <algorithm>
+#include <cmath>
 
 TimelineWidget::TimelineWidget(QWidget* parent)
     : QWidget(parent)
@@ -44,6 +45,40 @@ TimelineWidget::TimelineWidget(QWidget* parent)
 }
 
 TimelineWidget::~TimelineWidget() = default;
+
+// --- Zoom to fit all clips ---
+
+void TimelineWidget::zoomToFitAll() {
+    double minTime = 1e18;
+    double maxTime = -1e18;
+    bool hasClips = false;
+
+    for (int ti = 0; ti < m_model->trackCount(); ++ti) {
+        Track* track = m_model->track(ti);
+        if (!track) continue;
+        for (const auto& clip : track->clips()) {
+            double start = clip.timelineOffset;
+            double end = start + clip.duration();
+            if (start < minTime) minTime = start;
+            if (end > maxTime) maxTime = end;
+            hasClips = true;
+        }
+    }
+
+    if (!hasClips) return;
+
+    double totalDuration = maxTime - minTime;
+    if (totalDuration <= 0.0) totalDuration = 1.0;
+
+    int viewWidth = width() - TrackHeaderWidth;
+    if (viewWidth < 50) viewWidth = 50;
+
+    // Fit all clips with 10% padding on each side
+    double targetZoom = (viewWidth * 0.8) / totalDuration;
+    m_model->setZoom(targetZoom);
+    m_model->setScrollOffset(minTime - totalDuration * 0.1);
+    update();
+}
 
 // --- Snapping ---
 
@@ -197,7 +232,7 @@ void TimelineWidget::addClipFromFile(const QString& path) {
     // Find or create appropriate track
     TrackType targetType = isFit ? TrackType::FitData : TrackType::Video;
     QString trackName = isFit ? "Data" : (isImage ? "Images" : "Video");
-    
+
     Track* targetTrack = nullptr;
     int targetTrackIndex = -1;
     for (int i = 0; i < m_model->trackCount(); ++i) {
@@ -208,7 +243,7 @@ void TimelineWidget::addClipFromFile(const QString& path) {
             break;
         }
     }
-    
+
     if (!targetTrack) {
         // Ensure FitData is above Video (index 0)
         if (isFit) {
@@ -234,11 +269,6 @@ void TimelineWidget::addClipFromFile(const QString& path) {
     if (isTimelineEmpty) {
         m_model->setTimeOrigin(absTimestamp);
         relativeOffset = 0.0;
-        int w = width();
-        if (w > 0 && duration > 0.0) {
-            double targetZoom = (w * 0.7) / duration;
-            m_model->setZoom(targetZoom);
-        }
     } else {
         // Timeline is not empty
         if (targetTrack->clipCount() == 0) {
@@ -270,7 +300,9 @@ void TimelineWidget::addClipFromFile(const QString& path) {
 
     targetTrack->addClip(clip);
     emit clipAdded(path, relativeOffset, duration);
-    update();
+
+    // Fit all clips into view after each insertion
+    zoomToFitAll();
 }
 
 // --- Delete selected clips ---
@@ -297,6 +329,8 @@ void TimelineWidget::deleteSelectedClips() {
     update();
 }
 
+// --- Paint ---
+
 void TimelineWidget::paintEvent(QPaintEvent*) {
     QPainter painter(this);
     painter.setRenderHint(QPainter::Antialiasing);
@@ -319,11 +353,23 @@ void TimelineWidget::paintRuler(QPainter& painter, const QRect& rect) {
     double offset = m_model->scrollOffset();
     bool hasOrigin = m_model->timeOrigin() > 0;
 
-    // Determine tick interval based on zoom level
-    double tickInterval = 1.0;
-    if (pixelsPerSecond < 5) tickInterval = 30.0;
-    else if (pixelsPerSecond < 10) tickInterval = 10.0;
-    else if (pixelsPerSecond < 30) tickInterval = 5.0;
+    // Dynamically compute tick interval so labels don't overlap.
+    // A timestamp label (e.g. "12:34:56" or "12:34") needs ~90px minimum spacing.
+    static constexpr double MinLabelSpacingPx = 90.0;
+
+    // Candidate intervals in seconds (nice round values)
+    static const double candidates[] = {
+        0.1, 0.2, 0.5, 1, 2, 5, 10, 15, 30, 60, 120, 300, 600, 900,
+        1800, 3600, 7200, 14400, 28800, 86400
+    };
+
+    double tickInterval = 86400.0; // fallback
+    for (double c : candidates) {
+        if (c * pixelsPerSecond >= MinLabelSpacingPx) {
+            tickInterval = c;
+            break;
+        }
+    }
 
     painter.setPen(QColor(130, 130, 130));
     QFont rulerFont("Arial", 8);
@@ -516,11 +562,16 @@ void TimelineWidget::mousePressEvent(QMouseEvent* event) {
             }
         }
     } else {
-        // Clicked empty area → deselect all
+        // Clicked empty area → deselect all and move playhead
         if (!m_selectedClips.isEmpty()) {
             m_selectedClips.clear();
             emit clipSelectionChanged(-1, -1);
         }
+        // Move playhead to clicked position in track area
+        m_scrubbing = true;
+        double time = xToTime(mx);
+        m_model->setPlayheadPosition(time);
+        emit playheadScrubbed(time);
     }
 
     // Emit selection signal for single-selected clip
@@ -585,6 +636,14 @@ void TimelineWidget::mouseReleaseEvent(QMouseEvent* event) {
         }
         m_draggingClip = false;
     }
+}
+
+void TimelineWidget::mouseDoubleClickEvent(QMouseEvent* event) {
+    if (event->button() == Qt::MiddleButton) {
+        zoomToFitAll();
+        return;
+    }
+    QWidget::mouseDoubleClickEvent(event);
 }
 
 // --- Key events ---
@@ -689,10 +748,56 @@ void TimelineWidget::contextMenuEvent(QContextMenuEvent* event) {
         // Place clip where its absolute timestamp maps on the current timeline
         // timelineOffset = absoluteStartTime - timeOrigin
         double newOffset = clipToMove.absoluteStartTime - m_model->timeOrigin();
+
+        double playhead = m_model->playheadPosition();
+        double distance = std::abs(newOffset - playhead);
+        static constexpr double EighteenHours = 18.0 * 3600.0;
+
+        if (distance > EighteenHours) {
+            // Clip would land more than 18h away — ask user
+            auto result = QMessageBox::question(this, "Relocate",
+                QString("This clip's timestamp is more than 18 hours away from "
+                        "the current playhead position.\n\n"
+                        "Yes = Ignore the date, keep only hours/minutes/seconds\n"
+                        "No = Use the actual full datetime\n"
+                        "Cancel = Don't relocate"),
+                QMessageBox::Yes | QMessageBox::No | QMessageBox::Cancel,
+                QMessageBox::Yes);
+
+            if (result == QMessageBox::Cancel) {
+                return;
+            }
+
+            if (result == QMessageBox::Yes) {
+                // Keep only h:m:s from the absolute timestamp, relative to
+                // the playhead's date.  Compute seconds-within-day of the
+                // clip's absolute time.
+                double clipAbsSeconds = clipToMove.absoluteStartTime;
+                double clipDaySeconds = std::fmod(clipAbsSeconds, 86400.0);
+                if (clipDaySeconds < 0.0) clipDaySeconds += 86400.0;
+
+                // Compute seconds-within-day of the playhead's absolute time
+                double playheadAbs = m_model->relativeToAbsolute(playhead);
+                double playheadDaySeconds = std::fmod(playheadAbs, 86400.0);
+                if (playheadDaySeconds < 0.0) playheadDaySeconds += 86400.0;
+
+                // Compute the start-of-day (midnight) for the playhead in
+                // absolute time, then place the clip at that day + clip's
+                // time-of-day.
+                double playheadMidnight = playheadAbs - playheadDaySeconds;
+                double newAbsTime = playheadMidnight + clipDaySeconds;
+
+                newOffset = newAbsTime - m_model->timeOrigin();
+            }
+            // result == No → use the original newOffset (full datetime)
+        }
+
         clipToMove.timelineOffset = newOffset;
 
         emit clipMoved(hit.first, hit.second, newOffset);
-        update();
+
+        // After relocate, adjust zoom/scroll to ensure all clips are visible
+        zoomToFitAll();
     });
 
     menu.exec(event->globalPos());

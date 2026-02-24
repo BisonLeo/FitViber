@@ -2,6 +2,7 @@
 #include "ClipTransform.h"
 #include <QPainter>
 #include <QMouseEvent>
+#include <QWheelEvent>
 #include <QtMath>
 
 PreviewCanvas::PreviewCanvas(QWidget* parent) : QWidget(parent) {
@@ -39,20 +40,27 @@ void PreviewCanvas::setComposited(bool composited) {
     update();
 }
 
+void PreviewCanvas::resetView() {
+    m_viewZoom = 1.0;
+    m_viewOffset = QPointF(0.0, 0.0);
+    update();
+}
+
 QRectF PreviewCanvas::canvasDisplayRect() const {
     if (!m_canvasSize.isValid() || m_canvasSize.isEmpty()) return QRectF();
 
     QSizeF canvasSize(m_canvasSize);
     QSizeF widgetSize = size();
 
-    double scaleW = widgetSize.width() / canvasSize.width();
-    double scaleH = widgetSize.height() / canvasSize.height();
-    double displayScale = qMin(scaleW, scaleH);
+    // Base scale: fit canvas aspect ratio into widget
+    double baseScale = qMin(widgetSize.width() / canvasSize.width(),
+                            widgetSize.height() / canvasSize.height());
+    double effectiveScale = baseScale * m_viewZoom;
 
-    double w = canvasSize.width() * displayScale;
-    double h = canvasSize.height() * displayScale;
-    double x = (widgetSize.width() - w) / 2.0;
-    double y = (widgetSize.height() - h) / 2.0;
+    double w = canvasSize.width() * effectiveScale;
+    double h = canvasSize.height() * effectiveScale;
+    double x = (widgetSize.width() - w) / 2.0 + m_viewOffset.x();
+    double y = (widgetSize.height() - h) / 2.0 + m_viewOffset.y();
 
     return QRectF(x, y, w, h);
 }
@@ -175,17 +183,18 @@ void PreviewCanvas::paintEvent(QPaintEvent*) {
             painter.restore();
         } else {
             // Identity transform — draw source centered in canvas, scaled to fit
+            QPointF center2 = cr.center();
             double displayScaleW = cr.width() / m_frame.width();
             double displayScaleH = cr.height() / m_frame.height();
             double fitScale = qMin(displayScaleW, displayScaleH);
             double fw = m_frame.width() * fitScale;
             double fh = m_frame.height() * fitScale;
-            QRectF frameRect(center.x() - fw / 2.0, center.y() - fh / 2.0, fw, fh);
+            QRectF frameRect(center2.x() - fw / 2.0, center2.y() - fh / 2.0, fw, fh);
             painter.drawImage(frameRect, m_frame);
         }
     }
 
-    // Draw handles
+    // Draw handles (not clipped to canvas — always visible even when source extends beyond)
     if (m_handlesVisible && m_transform) {
         auto corners = transformedCorners();
         if (corners.size() == 4) {
@@ -208,6 +217,15 @@ void PreviewCanvas::paintEvent(QPaintEvent*) {
 }
 
 void PreviewCanvas::mousePressEvent(QMouseEvent* event) {
+    // Middle button → viewport pan
+    if (event->button() == Qt::MiddleButton) {
+        m_dragMode = DragMode::ViewPan;
+        m_viewPanStart = event->position();
+        m_viewOffsetStart = m_viewOffset;
+        setCursor(Qt::ClosedHandCursor);
+        return;
+    }
+
     if (event->button() != Qt::LeftButton) return;
 
     QPointF pos = event->position();
@@ -232,6 +250,14 @@ void PreviewCanvas::mousePressEvent(QMouseEvent* event) {
 }
 
 void PreviewCanvas::mouseMoveEvent(QMouseEvent* event) {
+    // Viewport pan with middle button
+    if (m_dragMode == DragMode::ViewPan) {
+        QPointF delta = event->position() - m_viewPanStart;
+        m_viewOffset = m_viewOffsetStart + delta;
+        update();
+        return;
+    }
+
     if (m_dragMode == DragMode::None) {
         // Update cursor based on hit-test
         int corner = -1;
@@ -288,8 +314,73 @@ void PreviewCanvas::mouseMoveEvent(QMouseEvent* event) {
 }
 
 void PreviewCanvas::mouseReleaseEvent(QMouseEvent* event) {
+    if (event->button() == Qt::MiddleButton && m_dragMode == DragMode::ViewPan) {
+        m_dragMode = DragMode::None;
+        setCursor(Qt::ArrowCursor);
+        return;
+    }
     if (event->button() == Qt::LeftButton) {
         m_dragMode = DragMode::None;
         m_activeCorner = -1;
     }
+}
+
+void PreviewCanvas::wheelEvent(QWheelEvent* event) {
+    if (!(event->modifiers() & Qt::ControlModifier)) {
+        event->ignore();
+        return;
+    }
+
+    // Ctrl+scroll → viewport zoom anchored at cursor
+    QPointF mousePos = event->position();
+    double factor = event->angleDelta().y() > 0 ? 1.15 : 1.0 / 1.15;
+    double newZoom = qBound(0.1, m_viewZoom * factor, 20.0);
+
+    // Compute the canvas-space point under the cursor before zoom
+    // canvasDisplayRect uses m_viewZoom and m_viewOffset
+    QRectF crBefore = canvasDisplayRect();
+    if (crBefore.isNull()) {
+        event->accept();
+        return;
+    }
+
+    // Relative position within the canvas display rect (0..1)
+    double relX = (mousePos.x() - crBefore.x()) / crBefore.width();
+    double relY = (mousePos.y() - crBefore.y()) / crBefore.height();
+
+    // Apply new zoom
+    double oldZoom = m_viewZoom;
+    m_viewZoom = newZoom;
+
+    // Compute what the new canvas rect would be with current offset
+    QSizeF canvasSize(m_canvasSize);
+    QSizeF widgetSize = size();
+    double baseScale = qMin(widgetSize.width() / canvasSize.width(),
+                            widgetSize.height() / canvasSize.height());
+
+    double newW = canvasSize.width() * baseScale * m_viewZoom;
+    double newH = canvasSize.height() * baseScale * m_viewZoom;
+
+    // The new top-left should be such that mousePos maps to the same relative point
+    double newX = mousePos.x() - relX * newW;
+    double newY = mousePos.y() - relY * newH;
+
+    // The centered position (with zero offset) would be:
+    double centeredX = (widgetSize.width() - newW) / 2.0;
+    double centeredY = (widgetSize.height() - newH) / 2.0;
+
+    // Offset is the difference
+    m_viewOffset.setX(newX - centeredX);
+    m_viewOffset.setY(newY - centeredY);
+
+    update();
+    event->accept();
+}
+
+void PreviewCanvas::mouseDoubleClickEvent(QMouseEvent* event) {
+    if (event->button() == Qt::MiddleButton) {
+        resetView();
+        return;
+    }
+    QWidget::mouseDoubleClickEvent(event);
 }

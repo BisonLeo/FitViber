@@ -18,6 +18,7 @@ public:
     void setCanvasSize(QSize canvasSize);
     void setSourceSize(QSize sourceSize);
     void setComposited(bool composited);
+    void resetView();
 
 signals:
     void transformChanged();
@@ -28,11 +29,13 @@ protected:
     void mousePressEvent(QMouseEvent* event) override;
     void mouseMoveEvent(QMouseEvent* event) override;
     void mouseReleaseEvent(QMouseEvent* event) override;
+    void wheelEvent(QWheelEvent* event) override;
+    void mouseDoubleClickEvent(QMouseEvent* event) override;
 
 private:
-    enum class DragMode { None, Scale, Pan, Rotate };
+    enum class DragMode { None, Scale, Pan, Rotate, ViewPan };
 
-    // Compute the display rect for the canvas fitted in the widget
+    // Compute the display rect for the canvas (with view zoom + pan applied)
     QRectF canvasDisplayRect() const;
 
     // Get transformed corner positions of the source frame in widget space
@@ -44,10 +47,11 @@ private:
     QImage m_frame;
     ClipTransform* m_transform = nullptr;
     bool m_handlesVisible = false;
-    bool m_composited = false;   // true: frame is already composited, don't re-transform
-    QSize m_canvasSize{1920, 1080};  // output canvas dimensions
-    QSize m_sourceSize;              // original source media dimensions (for handles)
+    bool m_composited = false;
+    QSize m_canvasSize{1920, 1080};
+    QSize m_sourceSize;
 
+    // Clip transform drag state
     DragMode m_dragMode = DragMode::None;
     QPointF m_dragStart;
     double m_dragStartScale = 1.0;
@@ -55,6 +59,12 @@ private:
     double m_dragStartPanX = 0.0;
     double m_dragStartPanY = 0.0;
     int m_activeCorner = -1;
+
+    // Viewport navigation (view zoom + pan)
+    double m_viewZoom = 1.0;
+    QPointF m_viewOffset{0.0, 0.0};  // pixel offset in widget space
+    QPointF m_viewPanStart;          // mouse pos at start of view pan
+    QPointF m_viewOffsetStart;       // view offset at start of view pan
 
     static constexpr double HandleRadius = 8.0;
     static constexpr double RotateMargin = 30.0;

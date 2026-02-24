@@ -3,6 +3,7 @@
 #include <QMainWindow>
 #include <QDockWidget>
 #include <QSize>
+#include <map>
 #include <memory>
 
 class MediaBrowser;
@@ -51,7 +52,7 @@ private:
     PlaybackController* m_playbackController = nullptr;
 
     std::unique_ptr<OverlayRenderer> m_overlayRenderer;
-    std::unique_ptr<FitTrack> m_timelineFitTrack;
+    std::map<QString, std::unique_ptr<FitTrack>> m_fitTracks; // per-clip FIT data keyed by source path
     std::unique_ptr<FitTrack> m_previewFitTrack;
     std::unique_ptr<TimeSync> m_timeSync;
     std::unique_ptr<VideoPlaybackEngine> m_playbackEngine;

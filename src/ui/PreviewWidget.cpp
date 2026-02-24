@@ -45,7 +45,8 @@ PreviewWidget::PreviewWidget(QWidget* parent) : QWidget(parent) {
     connect(m_stepBackButton, &QPushButton::clicked, this, &PreviewWidget::stepBackward);
     connect(m_stepForwardButton, &QPushButton::clicked, this, &PreviewWidget::stepForward);
     connect(m_seekSlider, &QSlider::sliderMoved, this, [this](int value) {
-        double time = m_duration * value / 10000.0;
+        double range = m_duration - m_startTime;
+        double time = m_startTime + range * value / 10000.0;
         emit seekRequested(time);
     });
 
@@ -64,15 +65,21 @@ void PreviewWidget::setDuration(double seconds) {
     m_duration = seconds;
 }
 
+void PreviewWidget::setStartTime(double seconds) {
+    m_startTime = seconds;
+}
+
 void PreviewWidget::setCurrentTime(double seconds) {
-    double pct = (m_duration > 0) ? (seconds / m_duration * 100.0) : 0.0;
+    double range = m_duration - m_startTime;
+    double elapsed = seconds - m_startTime;
+    double pct = (range > 0) ? (elapsed / range * 100.0) : 0.0;
     m_timeLabel->setText(QString("%1 / %2  %3%")
-        .arg(TimeUtil::secondsToHMSms(seconds))
-        .arg(TimeUtil::secondsToHMSms(m_duration))
+        .arg(TimeUtil::secondsToHMSms(elapsed))
+        .arg(TimeUtil::secondsToHMSms(range))
         .arg(pct, 0, 'f', 1));
 
-    if (!m_seekSlider->isSliderDown() && m_duration > 0) {
-        m_seekSlider->setValue(static_cast<int>(seconds / m_duration * 10000));
+    if (!m_seekSlider->isSliderDown() && range > 0) {
+        m_seekSlider->setValue(static_cast<int>(elapsed / range * 10000));
     }
 }
 

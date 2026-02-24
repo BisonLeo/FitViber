@@ -26,7 +26,7 @@ void PlaybackController::pause() {
 void PlaybackController::stop() {
     m_timer.stop();
     m_state = PlaybackState::Stopped;
-    m_currentTime = 0.0;
+    m_currentTime = m_startTime;
     emit stateChanged(m_state);
     emit tick(m_currentTime);
 }
@@ -40,7 +40,7 @@ void PlaybackController::togglePlayPause() {
 }
 
 void PlaybackController::seek(double seconds) {
-    m_currentTime = qBound(0.0, seconds, m_duration);
+    m_currentTime = qBound(m_startTime, seconds, m_duration);
     emit seekPerformed(m_currentTime);
     emit tick(m_currentTime);
 }
@@ -62,6 +62,10 @@ void PlaybackController::setFps(double fps) {
 
 void PlaybackController::setDuration(double duration) {
     m_duration = duration;
+}
+
+void PlaybackController::setStartTime(double startTime) {
+    m_startTime = startTime;
 }
 
 void PlaybackController::onTimer() {

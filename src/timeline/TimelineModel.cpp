@@ -42,6 +42,16 @@ double TimelineModel::duration() const {
     return maxDur;
 }
 
+double TimelineModel::minTime() const {
+    double minT = 0.0;
+    for (const auto& t : m_tracks) {
+        for (const auto& c : t->clips()) {
+            if (c.timelineOffset < minT) minT = c.timelineOffset;
+        }
+    }
+    return minT;
+}
+
 void TimelineModel::setPlayheadPosition(double seconds) {
     if (m_playhead != seconds) {
         m_playhead = seconds;
