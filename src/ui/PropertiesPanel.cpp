@@ -14,6 +14,16 @@ PropertiesPanel::PropertiesPanel(QWidget* parent) : QWidget(parent) {
     m_contentLayout = new QVBoxLayout(m_contentWidget);
     m_contentLayout->setAlignment(Qt::AlignTop);
 
+    // Clip info group
+    m_clipInfoGroup = new QGroupBox("Clip Info", m_contentWidget);
+    auto* infoLayout = new QVBoxLayout(m_clipInfoGroup);
+    m_clipInfoLabel = new QLabel(m_clipInfoGroup);
+    m_clipInfoLabel->setWordWrap(true);
+    m_clipInfoLabel->setTextInteractionFlags(Qt::TextSelectableByMouse);
+    infoLayout->addWidget(m_clipInfoLabel);
+    m_contentLayout->addWidget(m_clipInfoGroup);
+    m_clipInfoGroup->setVisible(false);
+
     // Transform controls group
     m_transformGroup = new QGroupBox("Transform", m_contentWidget);
     auto* tLayout = new QVBoxLayout(m_transformGroup);
@@ -112,4 +122,54 @@ void PropertiesPanel::updateTransformLabels() {
     m_panLabel->setText(QString("Pan: %1, %2")
         .arg(static_cast<int>(m_transform->panX))
         .arg(static_cast<int>(m_transform->panY)));
+}
+
+void PropertiesPanel::setClipInfo(const ClipInfo& info) {
+    m_clipInfoGroup->setVisible(true);
+
+    QString text;
+    text += QString("<b>Type:</b> %1<br>").arg(info.type);
+    text += QString("<b>Path:</b> %1<br>").arg(info.path);
+
+    if (info.type == "Video" || info.type == "Image") {
+        text += QString("<b>Size:</b> %1 x %2<br>").arg(info.width).arg(info.height);
+        if (info.fps > 0)
+            text += QString("<b>Frame Rate:</b> %1 fps<br>").arg(info.fps, 0, 'f', 2);
+        if (info.totalFrames > 0)
+            text += QString("<b>Total Frames:</b> %1<br>").arg(info.totalFrames);
+        if (info.totalSeconds > 0) {
+            int ts = static_cast<int>(info.totalSeconds);
+            int h = ts / 3600, m = (ts % 3600) / 60, s = ts % 60;
+            QString durStr = h > 0
+                ? QString("%1:%2:%3").arg(h).arg(m, 2, 10, QChar('0')).arg(s, 2, 10, QChar('0'))
+                : QString("%1:%2").arg(m).arg(s, 2, 10, QChar('0'));
+            text += QString("<b>Duration:</b> %1 (%2s)<br>").arg(durStr).arg(info.totalSeconds, 0, 'f', 2);
+        }
+        if (!info.codec.isEmpty())
+            text += QString("<b>Codec:</b> %1<br>").arg(info.codec);
+    } else if (info.type == "FIT Data") {
+        if (!info.firstTimestamp.isEmpty())
+            text += QString("<b>Start:</b> %1<br>").arg(info.firstTimestamp);
+        text += QString("<b>Records:</b> %1<br>").arg(info.totalRecords);
+        if (info.totalSeconds > 0) {
+            int ts = static_cast<int>(info.totalSeconds);
+            int h = ts / 3600, m = (ts % 3600) / 60, s = ts % 60;
+            QString durStr = h > 0
+                ? QString("%1:%2:%3").arg(h).arg(m, 2, 10, QChar('0')).arg(s, 2, 10, QChar('0'))
+                : QString("%1:%2").arg(m).arg(s, 2, 10, QChar('0'));
+            text += QString("<b>Duration:</b> %1<br>").arg(durStr);
+        }
+        double distKm = info.totalDistance / 1000.0;
+        if (distKm >= 1.0)
+            text += QString("<b>Distance:</b> %1 km<br>").arg(distKm, 0, 'f', 2);
+        else
+            text += QString("<b>Distance:</b> %1 m<br>").arg(static_cast<int>(info.totalDistance));
+    }
+
+    m_clipInfoLabel->setText(text);
+}
+
+void PropertiesPanel::clearClipInfo() {
+    m_clipInfoGroup->setVisible(false);
+    m_clipInfoLabel->clear();
 }

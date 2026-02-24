@@ -15,6 +15,7 @@
 #include "VideoPlaybackEngine.h"
 #include "OverlayPanelFactory.h"
 
+#include "MediaProbe.h"
 #include <QMenuBar>
 #include <QMenu>
 #include <QAction>
@@ -671,6 +672,8 @@ void MainWindow::onClipSelectionChanged(int trackIndex, int clipIndex) {
         m_previewWidget->setClipTransform(nullptr);
         m_previewWidget->setHandlesVisible(false);
         m_propertiesPanel->setClipTransform(nullptr);
+        m_propertiesPanel->clearClipInfo();
+        statusBar()->clearMessage();
         return;
     }
 
@@ -679,6 +682,8 @@ void MainWindow::onClipSelectionChanged(int trackIndex, int clipIndex) {
         m_previewWidget->setClipTransform(nullptr);
         m_previewWidget->setHandlesVisible(false);
         m_propertiesPanel->setClipTransform(nullptr);
+        m_propertiesPanel->clearClipInfo();
+        statusBar()->clearMessage();
         return;
     }
 
@@ -692,6 +697,49 @@ void MainWindow::onClipSelectionChanged(int trackIndex, int clipIndex) {
         m_previewWidget->setHandlesVisible(false);
         m_propertiesPanel->setClipTransform(nullptr);
     }
+
+    // Populate clip info
+    ClipInfo info;
+    info.path = clip.sourcePath;
+
+    if (clip.type == ClipType::Video || clip.type == ClipType::Image) {
+        info.type = (clip.type == ClipType::Video) ? "Video" : "Image";
+        MediaProbe probe;
+        if (probe.probe(clip.sourcePath)) {
+            const auto& mi = probe.info();
+            info.width = mi.videoWidth;
+            info.height = mi.videoHeight;
+            info.fps = mi.videoFps;
+            info.totalSeconds = mi.duration;
+            info.codec = mi.videoCodec;
+            if (mi.videoFps > 0 && mi.duration > 0)
+                info.totalFrames = static_cast<int>(mi.videoFps * mi.duration);
+        }
+        statusBar()->showMessage(QString("%1: %2x%3, %4 fps, %5s")
+            .arg(clip.displayName).arg(info.width).arg(info.height)
+            .arg(info.fps, 0, 'f', 1).arg(info.totalSeconds, 0, 'f', 1));
+    } else if (clip.type == ClipType::FitData) {
+        info.type = "FIT Data";
+        auto it = m_fitTracks.find(clip.sourcePath);
+        if (it != m_fitTracks.end() && it->second) {
+            const auto& session = it->second->session();
+            info.totalRecords = static_cast<int>(session.records.size());
+            info.totalSeconds = session.totalElapsedTime;
+            info.totalDistance = session.totalDistance;
+            if (!session.records.empty()) {
+                QDateTime dt = QDateTime::fromSecsSinceEpoch(
+                    static_cast<qint64>(session.records.front().timestamp),
+                    QTimeZone(8 * 3600));
+                info.firstTimestamp = dt.toString("yyyy-MM-dd HH:mm:ss");
+            }
+        }
+        double distKm = info.totalDistance / 1000.0;
+        statusBar()->showMessage(QString("%1: %2 records, %3 km, %4s")
+            .arg(clip.displayName).arg(info.totalRecords)
+            .arg(distKm, 0, 'f', 1).arg(info.totalSeconds, 0, 'f', 0));
+    }
+
+    m_propertiesPanel->setClipInfo(info);
 }
 
 QImage MainWindow::applyTransform(const QImage& source, const ClipTransform& transform) {
