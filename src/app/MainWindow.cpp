@@ -220,6 +220,7 @@ void MainWindow::onMediaSelected(const QString& path) {
     QStringList imageExts = {"jpg", "jpeg", "png", "bmp", "tiff", "tif"};
     if (imageExts.contains(suffix)) {
         // Image mode
+        m_playbackFromTimeline = false;  // must be before stop() to prevent timeline playhead reset
         m_playbackController->stop();
         m_playbackEngine->close();
         m_previewFitData = false;
@@ -236,12 +237,12 @@ void MainWindow::onMediaSelected(const QString& path) {
     }
 
     // Video mode
+    m_playbackFromTimeline = false;  // must be before stop() to prevent timeline playhead reset
     m_playbackController->stop();
     m_playbackEngine->close();
     m_previewFitData = false;
     if (m_previewFitTrack) m_previewFitTrack->clear();
 
-    m_playbackFromTimeline = false;
     m_currentClipPath = path;
 
     if (!m_playbackEngine->open(path)) {
@@ -520,10 +521,10 @@ void MainWindow::onFitFileOpened(const QString& path) {
                 m_previewFitTrack->loadSession(parser.session());
                 statusBar()->showMessage(QString("Loaded FIT file: %1 (Records: %2)").arg(QFileInfo(path).fileName()).arg(m_previewFitTrack->records().size()));
         
+                m_playbackFromTimeline = false;  // must be before stop() to prevent timeline playhead reset
                 m_playbackController->stop();
                 m_playbackEngine->close();
-                
-                m_playbackFromTimeline = false;
+
                 m_previewFitData = true;
                 m_currentClipPath = path;
         

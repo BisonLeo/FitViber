@@ -27,7 +27,18 @@ TimelineWidget::TimelineWidget(QWidget* parent)
     setFocusPolicy(Qt::StrongFocus);
     setAcceptDrops(true);
 
-    connect(m_model.get(), &TimelineModel::playheadChanged, this, [this](double) {
+    connect(m_model.get(), &TimelineModel::playheadChanged, this, [this](double pos) {
+        // Auto-scroll when playhead goes beyond visible area (not during manual scrub/drag)
+        if (!m_scrubbing && !m_draggingClip && !m_panning) {
+            int px = timeToX(pos);
+            int viewLeft = TrackHeaderWidth;
+            int viewRight = width();
+            if (px < viewLeft || px > viewRight) {
+                // Scroll so playhead is at 20% of visible width
+                double viewWidth = (viewRight - viewLeft) / m_model->zoom();
+                m_model->setScrollOffset(pos - viewWidth * 0.2);
+            }
+        }
         update();
     });
 }
@@ -630,104 +641,48 @@ void TimelineWidget::contextMenuEvent(QContextMenuEvent* event) {
 
     QAction* realignAction = menu.addAction("Realign");
     connect(realignAction, &QAction::triggered, this, [this, hit]() {
-        QMessageBox::StandardButton reply = QMessageBox::question(this, "Realign", 
-            "Timeline timestamps will be recalculated based on the current selected clip. Continue?",
-            QMessageBox::Yes | QMessageBox::No);
-        if (reply == QMessageBox::Yes) {
-            Track* t = m_model->track(hit.first);
-            if (t && hit.second < t->clipCount()) {
-                double targetStartOffset = 0.0;
-                double shift = targetStartOffset - t->clip(hit.second).timelineOffset;
-                
-                // Find minimum offset after shift to avoid negative timeline positions
-                double minNewOffset = 0.0;
-                for (int i = 0; i < m_model->trackCount(); ++i) {
-                    Track* tr = m_model->track(i);
-                    for (int j = 0; j < tr->clipCount(); ++j) {
-                        double noff = tr->clips()[j].timelineOffset + shift;
-                        if (noff < minNewOffset) minNewOffset = noff;
-                    }
-                }
-                
-                // Adjust shift so that the earliest clip starts at 0
-                shift -= minNewOffset; 
-                
-                for (int i = 0; i < m_model->trackCount(); ++i) {
-                    Track* tr = m_model->track(i);
-                    for (int j = 0; j < tr->clipCount(); ++j) {
-                        tr->clips()[j].timelineOffset += shift;
-                        emit clipMoved(i, j, tr->clips()[j].timelineOffset);
-                    }
-                }
-                
-                double maxDur = m_model->duration();
-                if (maxDur > 0) {
-                    double targetZoom = (this->width() - TrackHeaderWidth) * 0.9 / maxDur;
-                    m_model->setZoom(std::max(0.001, targetZoom));
-                    m_model->setScrollOffset(0);
-                }
-                update();
-            }
+        Track* t = m_model->track(hit.first);
+        if (!t || hit.second >= t->clipCount()) return;
+
+        const Clip& clip = t->clip(hit.second);
+        if (clip.absoluteStartTime <= 0.0) {
+            QMessageBox::information(this, "Realign",
+                "This clip has no detected timestamp to align to.");
+            return;
         }
+
+        // Set time origin so this clip's absolute timestamp matches its timeline position
+        // absoluteTime = timeOrigin + timelineOffset
+        m_model->setTimeOrigin(clip.absoluteStartTime - clip.timelineOffset);
+        update();
     });
 
     QAction* relocateAction = menu.addAction("Relocate");
     connect(relocateAction, &QAction::triggered, this, [this, hit]() {
         Track* currentTrack = m_model->track(hit.first);
         if (!currentTrack || hit.second >= currentTrack->clipCount()) return;
-        
+
         Clip& clipToMove = currentTrack->clips()[hit.second];
-        
-        double epoch = 0.0;
-        bool epochFound = false;
-        
-        // Find reference epoch from FitData track
-        for (int i = 0; i < m_model->trackCount(); ++i) {
-            Track* tr = m_model->track(i);
-            if (tr->type() == TrackType::FitData && tr->clipCount() > 0) {
-                const Clip& refClip = tr->clips()[0];
-                if (&refClip != &clipToMove) {
-                    epoch = refClip.absoluteStartTime - refClip.timelineOffset;
-                    epochFound = true;
-                    break;
-                }
-            }
+
+        if (clipToMove.absoluteStartTime <= 0.0) {
+            QMessageBox::information(this, "Relocate",
+                "This clip has no detected timestamp to relocate from.");
+            return;
         }
-        
-        // Fallback to first video clip
-        if (!epochFound) {
-            for (int i = 0; i < m_model->trackCount(); ++i) {
-                Track* tr = m_model->track(i);
-                if (tr->type() == TrackType::Video && tr->clipCount() > 0) {
-                    const Clip& refClip = tr->clips()[0];
-                    if (&refClip != &clipToMove) {
-                        epoch = refClip.absoluteStartTime - refClip.timelineOffset;
-                        epochFound = true;
-                        break;
-                    }
-                }
-            }
+
+        if (m_model->timeOrigin() <= 0.0) {
+            QMessageBox::information(this, "Relocate",
+                "Timeline has no time reference. Use Realign on a clip first.");
+            return;
         }
-        
-        if (epochFound) {
-            double newOffset = clipToMove.absoluteStartTime - epoch;
-            newOffset = std::max(0.0, newOffset);
-            
-            newOffset = resolveOverlap(hit.first, newOffset, clipToMove.duration(), hit.second);
-            clipToMove.timelineOffset = newOffset;
-            
-            emit clipMoved(hit.first, hit.second, newOffset);
-            
-            double maxDur = m_model->duration();
-            if (maxDur > 0) {
-                double targetZoom = (this->width() - TrackHeaderWidth) * 0.9 / maxDur;
-                m_model->setZoom(std::max(0.001, targetZoom));
-                m_model->setScrollOffset(0);
-            }
-            update();
-        } else {
-            QMessageBox::information(this, "Relocate", "No reference clip found to establish timeline scale.");
-        }
+
+        // Place clip where its absolute timestamp maps on the current timeline
+        // timelineOffset = absoluteStartTime - timeOrigin
+        double newOffset = clipToMove.absoluteStartTime - m_model->timeOrigin();
+        clipToMove.timelineOffset = newOffset;
+
+        emit clipMoved(hit.first, hit.second, newOffset);
+        update();
     });
 
     menu.exec(event->globalPos());
