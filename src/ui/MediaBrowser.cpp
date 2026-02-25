@@ -384,35 +384,7 @@ void MediaBrowser::onImportClicked() {
         "All Files (*)");
 
     for (const auto& path : paths) {
-        if (m_mediaPaths.contains(path)) continue;
-        m_mediaPaths.append(path);
-
-        QFileInfo info(path);
-        MediaType type = classifyFile(info.suffix());
-
-        QPixmap thumb;
-        switch (type) {
-            case MediaType::Video: thumb = generateVideoThumbnail(path); break;
-            case MediaType::Image: thumb = generateImageThumbnail(path); break;
-            case MediaType::FIT:   thumb = generateFitThumbnail(path); break;
-        }
-
-        auto* item = new QListWidgetItem(QIcon(thumb), info.fileName());
-        item->setData(UserRolePath, path);
-        item->setData(UserRoleType, static_cast<int>(type));
-        item->setToolTip(path);
-        item->setSizeHint(QSize(ThumbWidth + 20, ThumbHeight + 40));
-
-        // Store video duration for hover scrub
-        if (type == MediaType::Video) {
-            VideoDecoder decoder;
-            if (decoder.open(path)) {
-                item->setData(UserRoleDuration, decoder.info().duration);
-                decoder.close();
-            }
-        }
-
-        m_listWidget->addItem(item);
+        addMediaFile(path);
     }
 }
 
@@ -497,4 +469,49 @@ bool MediaBrowser::eventFilter(QObject* obj, QEvent* event) {
     }
 
     return QWidget::eventFilter(obj, event);
+}
+
+void MediaBrowser::clearMedia()
+{
+    m_mediaPaths.clear();
+    m_listWidget->clear();
+    if (m_scrubDecoder) {
+        m_scrubDecoder->close();
+        m_scrubDecoder.reset();
+    }
+    m_hoveredItem = nullptr;
+}
+
+void MediaBrowser::addMediaFile(const QString& path)
+{
+    if (m_mediaPaths.contains(path)) return;
+    m_mediaPaths.append(path);
+
+    QFileInfo info(path);
+    MediaType type = classifyFile(info.suffix());
+
+    QPixmap thumb;
+    switch (type) {
+        case MediaType::Video: thumb = generateVideoThumbnail(path); break;
+        case MediaType::Image: thumb = generateImageThumbnail(path); break;
+        case MediaType::FIT:   thumb = generateFitThumbnail(path); break;
+    }
+
+    auto* item = new QListWidgetItem(QIcon(thumb), info.fileName());
+    item->setData(UserRolePath, path);
+    item->setData(UserRoleType, static_cast<int>(type));
+    item->setToolTip(path);
+    item->setSizeHint(QSize(ThumbWidth + 20, ThumbHeight + 40));
+
+    // Store video duration for hover scrub
+    if (type == MediaType::Video) {
+        VideoDecoder decoder;
+        if (decoder.open(path)) {
+            item->setData(UserRoleDuration, decoder.info().duration);
+            decoder.close();
+        }
+    }
+
+    m_listWidget->addItem(item);
+    emit mediaImported(path);
 }

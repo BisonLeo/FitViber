@@ -15,13 +15,18 @@ class OverlayRenderer;
 class FitTrack;
 class TimeSync;
 class VideoPlaybackEngine;
+class ProjectManager;
 struct ClipTransform;
+struct ProjectSettings;
 
 class MainWindow : public QMainWindow {
     Q_OBJECT
 public:
     explicit MainWindow(QWidget* parent = nullptr);
     ~MainWindow();
+
+protected:
+    void closeEvent(QCloseEvent* event) override;
 
 private slots:
     void onMediaSelected(const QString& path);
@@ -32,6 +37,13 @@ private slots:
     void onTimelineScrub(double relativeSeconds);
     void onClipSelectionChanged(int trackIndex, int clipIndex);
     void onCanvasSettings();
+    
+    // Project file operations
+    void onNewProject();
+    void onOpenProject();
+    void onSaveProject();
+    void onSaveProjectAs();
+    void onAutosaveTriggered(const QString& autosavePath);
 
 private:
     void setupUi();
@@ -40,6 +52,7 @@ private:
     void connectSignals();
     void renderOverlay(QImage& frame, double currentTime);
     QImage applyTransform(const QImage& source, const ClipTransform& transform);
+    bool maybeSaveModified(); // returns false if the user cancelled
 
     QDockWidget* m_mediaDock = nullptr;
     QDockWidget* m_propertiesDock = nullptr;
@@ -65,4 +78,14 @@ private:
     double m_lastSourceTime = -1.0; // previous tick's source time
 
     QSize m_canvasSize{1920, 1080}; // output canvas dimensions
+    
+    // Project management
+    std::unique_ptr<ProjectManager> m_projectManager;
+    QString m_currentProjectPath;
+    bool m_projectModified = false;
+    
+    void updateProjectSettings();
+    ProjectSettings collectProjectSettings() const;
+    void applyProjectSettings(const ProjectSettings& settings);
+    void loadFitDataForClips();
 };

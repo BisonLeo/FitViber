@@ -29,9 +29,19 @@ public:
     explicit MediaBrowser(QWidget* parent = nullptr);
     ~MediaBrowser();
 
+    // Get all imported media file paths
+    QStringList getImportedMediaPaths() const { return m_mediaPaths; }
+    
+    // Clear all imported media
+    void clearMedia();
+    
+    // Add a media file to the browser (used during project load)
+    void addMediaFile(const QString& path);
+
 signals:
     void mediaSelected(const QString& path);
     void fitFileSelected(const QString& path);
+    void mediaImported(const QString& path);
 
 protected:
     bool eventFilter(QObject* obj, QEvent* event) override;

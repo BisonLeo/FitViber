@@ -95,6 +95,7 @@ endif()
 set(SOURCES
     src/main.cpp
     src/app/MainWindow.cpp
+    src/app/ProjectManager.cpp
     src/fit/FitParser.cpp
     src/fit/FitTrack.cpp
     src/media/VideoDecoder.cpp
@@ -131,6 +132,7 @@ set(SOURCES
 set(HEADERS
     src/app/MainWindow.h
     src/app/AppConstants.h
+    src/app/ProjectManager.h
     src/fit/FitParser.h
     src/fit/FitData.h
     src/fit/FitTrack.h

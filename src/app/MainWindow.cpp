@@ -14,6 +14,7 @@
 #include "TimeSync.h"
 #include "VideoPlaybackEngine.h"
 #include "OverlayPanelFactory.h"
+#include "ProjectManager.h"
 
 #include "MediaProbe.h"
 #include <QMenuBar>
@@ -29,6 +30,9 @@
 #include <QFormLayout>
 #include <QDialogButtonBox>
 #include <QtMath>
+#include <QCloseEvent>
+#include <QDir>
+#include <QRegularExpression>
 
 MainWindow::MainWindow(QWidget* parent)
     : QMainWindow(parent)
@@ -36,6 +40,7 @@ MainWindow::MainWindow(QWidget* parent)
     , m_previewFitTrack(std::make_unique<FitTrack>())
     , m_timeSync(std::make_unique<TimeSync>())
     , m_playbackEngine(std::make_unique<VideoPlaybackEngine>())
+    , m_projectManager(std::make_unique<ProjectManager>())
 {
     setWindowTitle(QString("%1 v%2").arg(AppConstants::AppName, AppConstants::AppVersion));
     resize(AppConstants::DefaultWindowWidth, AppConstants::DefaultWindowHeight);
@@ -56,6 +61,10 @@ MainWindow::MainWindow(QWidget* parent)
     // Set initial canvas size on preview
     m_previewWidget->setCanvasSize(m_canvasSize);
 
+    // Connect project manager signals
+    connect(m_projectManager.get(), &ProjectManager::autosaveTriggered,
+            this, &MainWindow::onAutosaveTriggered);
+
     statusBar()->showMessage("Ready");
 }
 
@@ -73,6 +82,25 @@ void MainWindow::setupUi() {
 
 void MainWindow::setupMenuBar() {
     auto* fileMenu = menuBar()->addMenu("&File");
+
+    // Project operations
+    auto* newProjectAction = fileMenu->addAction("&New Project");
+    newProjectAction->setShortcut(QKeySequence::New);
+    connect(newProjectAction, &QAction::triggered, this, &MainWindow::onNewProject);
+
+    auto* openProjectAction = fileMenu->addAction("&Open Project...");
+    openProjectAction->setShortcut(QKeySequence::Open);
+    connect(openProjectAction, &QAction::triggered, this, &MainWindow::onOpenProject);
+
+    auto* saveProjectAction = fileMenu->addAction("&Save Project");
+    saveProjectAction->setShortcut(QKeySequence::Save);
+    connect(saveProjectAction, &QAction::triggered, this, &MainWindow::onSaveProject);
+
+    auto* saveProjectAsAction = fileMenu->addAction("Save Project &As...");
+    saveProjectAsAction->setShortcut(QKeySequence::SaveAs);
+    connect(saveProjectAsAction, &QAction::triggered, this, &MainWindow::onSaveProjectAs);
+
+    fileMenu->addSeparator();
 
     auto* openVideoAction = fileMenu->addAction("Open &Video...");
     connect(openVideoAction, &QAction::triggered, this, [this]() {
@@ -96,6 +124,7 @@ void MainWindow::setupMenuBar() {
     fileMenu->addSeparator();
 
     auto* exitAction = fileMenu->addAction("E&xit");
+    exitAction->setShortcut(QKeySequence::Quit);
     connect(exitAction, &QAction::triggered, this, &QWidget::close);
 
     auto* viewMenu = menuBar()->addMenu("&View");
@@ -153,6 +182,9 @@ void MainWindow::connectSignals() {
             this, &MainWindow::onMediaSelected);
     connect(m_mediaBrowser, &MediaBrowser::fitFileSelected,
             this, &MainWindow::onFitFileOpened);
+    connect(m_mediaBrowser, &MediaBrowser::mediaImported, this, [this]() {
+        m_projectModified = true;
+    });
 
     // Playback tick → pull next frame from decode queue
     connect(m_playbackController, &PlaybackController::tick,
@@ -196,6 +228,7 @@ void MainWindow::connectSignals() {
             this, &MainWindow::onTimelineScrub);
 
     connect(m_timelineWidget, &TimelineWidget::clipAdded, this, [this](const QString& path, double offset, double dur) {
+        m_projectModified = true;
         if (QFileInfo(path).suffix().toLower() == "fit") {
             FitParser parser;
             if (parser.parse(path)) {
@@ -212,6 +245,7 @@ void MainWindow::connectSignals() {
     });
 
     connect(m_timelineWidget, &TimelineWidget::clipMoved, this, [this](int trackIndex, int clipIndex, double newOffset) {
+        m_projectModified = true;
         auto* track = m_timelineWidget->model()->track(trackIndex);
         if (track && track->type() == TrackType::FitData) {
             const Clip& clip = track->clips()[clipIndex];
@@ -283,6 +317,7 @@ void MainWindow::onCanvasSettings() {
     if (dlg.exec() == QDialog::Accepted) {
         m_canvasSize = QSize(widthSpin->value(), heightSpin->value());
         m_previewWidget->setCanvasSize(m_canvasSize);
+        m_projectModified = true;
 
         // Re-render current frame if in timeline mode
         if (m_playbackFromTimeline) {
@@ -766,4 +801,256 @@ QImage MainWindow::applyTransform(const QImage& source, const ClipTransform& tra
 void MainWindow::onExportRequested() {
     // TODO: Phase 10 - export dialog
     QMessageBox::information(this, "Export", "Export functionality coming soon.");
+}
+
+// ============================================================================
+// Project Management
+// ============================================================================
+
+bool MainWindow::maybeSaveModified()
+{
+    if (!m_projectModified) return true;
+
+    auto reply = QMessageBox::question(this, "Unsaved Changes",
+        "Current project has unsaved changes. Save before proceeding?",
+        QMessageBox::Save | QMessageBox::Discard | QMessageBox::Cancel);
+
+    if (reply == QMessageBox::Save) {
+        onSaveProject();
+        return !m_projectModified; // false if save failed/cancelled
+    }
+    return reply != QMessageBox::Cancel;
+}
+
+void MainWindow::onNewProject()
+{
+    if (!maybeSaveModified()) return;
+
+    // Clear timeline
+    auto* model = m_timelineWidget->model();
+    while (model->trackCount() > 0) {
+        model->removeTrack(0);
+    }
+
+    // Clear media browser
+    m_mediaBrowser->clearMedia();
+
+    // Clear FIT tracks
+    m_fitTracks.clear();
+    m_previewFitTrack->clear();
+
+    // Reset settings
+    m_canvasSize = QSize(1920, 1080);
+    m_previewWidget->setCanvasSize(m_canvasSize);
+    model->setZoom(1.0);
+    model->setScrollOffset(0.0);
+    model->setTimeOrigin(0.0);
+    model->setPlayheadPosition(0.0);
+    m_timeSync->setFitTimeOffset(0.0);
+
+    // Clear overlay panels and re-add defaults
+    m_overlayRenderer->clearPanels();
+    m_overlayRenderer->addPanel(OverlayPanelFactory::create(PanelType::HeartRate, this));
+    m_overlayRenderer->addPanel(OverlayPanelFactory::create(PanelType::Distance, this));
+    m_overlayRenderer->addPanel(OverlayPanelFactory::create(PanelType::Elevation, this));
+    m_overlayRenderer->addPanel(OverlayPanelFactory::create(PanelType::Inclination, this));
+    m_overlayRenderer->addPanel(OverlayPanelFactory::create(PanelType::Speed, this));
+    m_overlayRenderer->addPanel(OverlayPanelFactory::create(PanelType::MiniMap, this));
+
+    // Stop playback
+    m_playbackController->stop();
+    m_playbackEngine->close();
+    m_playbackFromTimeline = false;
+    m_previewFitData = false;
+
+    // Reset project state
+    m_currentProjectPath.clear();
+    m_projectModified = false;
+    setWindowTitle(QString("%1 v%2 - [Untitled]").arg(AppConstants::AppName, AppConstants::AppVersion));
+    
+    m_projectManager->stopAutosave();
+    
+    statusBar()->showMessage("New project created");
+}
+
+void MainWindow::onOpenProject()
+{
+    if (!maybeSaveModified()) return;
+
+    QString filePath = QFileDialog::getOpenFileName(this, "Open Project", {},
+        "FitViber Projects (*.fvProj);;All Files (*)");
+    
+    if (filePath.isEmpty()) {
+        return;
+    }
+
+    // Check for autosave files
+    if (m_projectManager->hasAutosaveFiles(filePath)) {
+        QString autosavePath = m_projectManager->getLatestAutosaveFile(filePath);
+        auto reply = QMessageBox::question(this, "Autosave Found",
+            QString("An autosave file was found for this project:\n%1\n\nWould you like to restore from the autosave file?").arg(autosavePath),
+            QMessageBox::Yes | QMessageBox::No);
+        
+        if (reply == QMessageBox::Yes) {
+            filePath = autosavePath;
+        }
+    }
+
+    ProjectSettings settings;
+    QStringList importedMedia;
+    QString originalPath;
+    if (m_projectManager->loadProject(filePath, settings, m_timelineWidget->model(), 
+                                      m_overlayRenderer.get(), m_timeSync.get(), importedMedia, &originalPath)) {
+        
+        // Apply loaded settings
+        applyProjectSettings(settings);
+        
+        // Restore imported media files to browser
+        m_mediaBrowser->clearMedia();
+        for (const QString& mediaPath : importedMedia) {
+            if (QFile::exists(mediaPath)) {
+                m_mediaBrowser->addMediaFile(mediaPath);
+            }
+        }
+        
+        // Load FIT data for all FitData clips
+        loadFitDataForClips();
+        
+        // Update UI - use original path from project file (works for both regular and autosave)
+        m_currentProjectPath = originalPath;
+        QFileInfo info(m_currentProjectPath);
+        
+        if (!filePath.endsWith(".autosave")) {
+            setWindowTitle(QString("%1 v%2 - %3").arg(AppConstants::AppName, AppConstants::AppVersion, info.fileName()));
+            m_projectModified = false;
+        } else {
+            setWindowTitle(QString("%1 v%2 - %3 [Recovered]").arg(AppConstants::AppName, AppConstants::AppVersion, info.fileName()));
+            m_projectModified = true;
+        }
+        
+        // Start autosave
+        updateProjectSettings();
+        m_projectManager->startAutosave(m_currentProjectPath, collectProjectSettings(),
+                                        m_timelineWidget->model(), m_overlayRenderer.get(),
+                                        m_mediaBrowser->getImportedMediaPaths());
+        
+        statusBar()->showMessage(QString("Project loaded: %1").arg(filePath));
+    } else {
+        QMessageBox::critical(this, "Error", 
+            QString("Failed to load project:\n%1").arg(m_projectManager->errorString()));
+    }
+}
+
+void MainWindow::onSaveProject()
+{
+    if (m_currentProjectPath.isEmpty()) {
+        onSaveProjectAs();
+        return;
+    }
+
+    updateProjectSettings();
+    if (m_projectManager->saveProject(m_currentProjectPath, collectProjectSettings(),
+                                      m_timelineWidget->model(), m_overlayRenderer.get(),
+                                      m_mediaBrowser->getImportedMediaPaths())) {
+        m_projectModified = false;
+        QFileInfo info(m_currentProjectPath);
+        setWindowTitle(QString("%1 v%2 - %3").arg(AppConstants::AppName, AppConstants::AppVersion, info.fileName()));
+        statusBar()->showMessage(QString("Project saved: %1").arg(m_currentProjectPath));
+        
+        // Restart autosave with current settings
+        m_projectManager->startAutosave(m_currentProjectPath, collectProjectSettings(),
+                                        m_timelineWidget->model(), m_overlayRenderer.get(),
+                                        m_mediaBrowser->getImportedMediaPaths());
+    } else {
+        QMessageBox::critical(this, "Error",
+            QString("Failed to save project:\n%1").arg(m_projectManager->errorString()));
+    }
+}
+
+void MainWindow::onSaveProjectAs()
+{
+    QString filePath = QFileDialog::getSaveFileName(this, "Save Project As", {},
+        "FitViber Projects (*.fvProj);;All Files (*)");
+    
+    if (filePath.isEmpty()) {
+        return;
+    }
+
+    // Ensure proper extension
+    if (!filePath.endsWith(".fvProj", Qt::CaseInsensitive)) {
+        filePath += ".fvProj";
+    }
+
+    m_currentProjectPath = filePath;
+    onSaveProject();
+}
+
+void MainWindow::onAutosaveTriggered(const QString& autosavePath)
+{
+    statusBar()->showMessage(QString("Autosaved: %1").arg(QFileInfo(autosavePath).fileName()), 3000);
+}
+
+ProjectSettings MainWindow::collectProjectSettings() const
+{
+    ProjectSettings settings;
+    settings.canvasSize = m_canvasSize;
+    settings.timelineZoom = m_timelineWidget->model()->zoom();
+    settings.timelineScrollOffset = m_timelineWidget->model()->scrollOffset();
+    settings.timeOrigin = m_timelineWidget->model()->timeOrigin();
+    settings.playheadPosition = m_timelineWidget->model()->playheadPosition();
+    settings.fitTimeOffset = m_timeSync->fitTimeOffset();
+    return settings;
+}
+
+void MainWindow::applyProjectSettings(const ProjectSettings& settings)
+{
+    m_canvasSize = settings.canvasSize;
+    m_previewWidget->setCanvasSize(m_canvasSize);
+    m_timelineWidget->model()->setZoom(settings.timelineZoom);
+    m_timelineWidget->model()->setScrollOffset(settings.timelineScrollOffset);
+    m_timelineWidget->model()->setTimeOrigin(settings.timeOrigin);
+    m_timelineWidget->model()->setPlayheadPosition(settings.playheadPosition);
+    m_timeSync->setFitTimeOffset(settings.fitTimeOffset);
+}
+
+void MainWindow::updateProjectSettings()
+{
+    // Update the settings used for autosave
+    if (!m_currentProjectPath.isEmpty()) {
+        m_projectManager->stopAutosave();
+    }
+}
+
+void MainWindow::loadFitDataForClips()
+{
+    m_fitTracks.clear();
+    
+    auto* model = m_timelineWidget->model();
+    for (int ti = 0; ti < model->trackCount(); ++ti) {
+        Track* track = model->track(ti);
+        if (!track || track->type() != TrackType::FitData) continue;
+        
+        for (int ci = 0; ci < track->clipCount(); ++ci) {
+            const Clip& clip = track->clip(ci);
+            if (clip.type == ClipType::FitData) {
+                FitParser parser;
+                if (parser.parse(clip.sourcePath)) {
+                    auto fitTrack = std::make_unique<FitTrack>();
+                    fitTrack->loadSession(parser.session());
+                    m_fitTracks[clip.sourcePath] = std::move(fitTrack);
+                }
+            }
+        }
+    }
+}
+
+void MainWindow::closeEvent(QCloseEvent* event)
+{
+    if (!maybeSaveModified()) {
+        event->ignore();
+        return;
+    }
+
+    m_projectManager->stopAutosave();
+    event->accept();
 }

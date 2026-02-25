@@ -23,6 +23,10 @@ public:
     OverlayPanel* panel(int index);
     const std::vector<std::unique_ptr<OverlayPanel>>& panels() const { return m_panels; }
 
+    // Get/set panel configurations for save/load
+    std::vector<PanelConfig> panelsConfig() const;
+    void setPanelsConfig(const std::vector<PanelConfig>& configs);
+
 private:
     std::vector<std::unique_ptr<OverlayPanel>> m_panels;
 };

@@ -1,5 +1,6 @@
 #include "OverlayRenderer.h"
 #include <QPainter>
+#include <QtGlobal>
 
 OverlayRenderer::OverlayRenderer(QObject* parent) : QObject(parent) {}
 OverlayRenderer::~OverlayRenderer() = default;
@@ -38,4 +39,19 @@ OverlayPanel* OverlayRenderer::panel(int index) {
         return m_panels[index].get();
     }
     return nullptr;
+}
+
+std::vector<PanelConfig> OverlayRenderer::panelsConfig() const {
+    std::vector<PanelConfig> configs;
+    configs.reserve(m_panels.size());
+    for (const auto& panel : m_panels) {
+        configs.push_back(panel->config());
+    }
+    return configs;
+}
+
+void OverlayRenderer::setPanelsConfig(const std::vector<PanelConfig>& configs) {
+    // Panels are recreated by MainWindow using OverlayPanelFactory
+    // This method is a placeholder for future panel management
+    Q_UNUSED(configs)
 }
