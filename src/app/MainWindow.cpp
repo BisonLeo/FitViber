@@ -416,6 +416,9 @@ void MainWindow::onPlaybackTick(double currentTime) {
 
         TimedFrame frame = m_playbackEngine->nextFrame();
         if (!frame.image.isNull()) {
+            // Sync controller to actual frame PTS to prevent timer drift
+            m_playbackController->syncTime(frame.pts);
+
             QImage renderImage = frame.image.convertToFormat(QImage::Format_ARGB32);
             renderImage.detach();
 
@@ -584,14 +587,23 @@ void MainWindow::onPlaybackTick(double currentTime) {
 
     TimedFrame frame = m_playbackEngine->nextFrame();
     if (!frame.image.isNull()) {
+        // Use actual frame PTS to derive the correct timeline time,
+        // preventing drift between the synthetic timer and real video time.
+        double actualTimelineTime = frame.pts - currentVisualClip->sourceIn + currentVisualClip->timelineOffset;
+        m_playbackController->syncTime(actualTimelineTime);
+        m_timelineWidget->model()->setPlayheadPosition(actualTimelineTime);
+
         QImage renderImage = frame.image.convertToFormat(QImage::Format_ARGB32);
         renderImage.detach();
         QImage composited = composeFrame(renderImage, currentVisualClip->transform);
-        renderOverlay(composited, currentTime);
+        renderOverlay(composited, actualTimelineTime);
         m_previewWidget->setComposited(true);
         m_previewWidget->setSourceSize(srcSize);
         m_previewWidget->displayFrame(composited);
         m_lastFramePts = frame.pts;
+        m_previewWidget->setCurrentTime(actualTimelineTime);
+        m_lastSourceTime = frame.pts;
+        return;
     }
 
     m_previewWidget->setCurrentTime(currentTime);

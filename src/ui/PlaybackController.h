@@ -28,6 +28,10 @@ public:
     void setDuration(double duration);
     void setStartTime(double startTime);
 
+    // Silently sync internal time to match actual frame PTS (no signals emitted).
+    // Use this to prevent drift between the timer-based clock and real video time.
+    void syncTime(double seconds);
+
     PlaybackState state() const { return m_state; }
     double currentTime() const { return m_currentTime; }
     double fps() const { return m_fps; }

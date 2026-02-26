@@ -88,10 +88,11 @@ bool ProjectManager::saveProject(const QString& filePath,
     file.write(doc.toJson(QJsonDocument::Indented));
     file.close();
 
-    // Clear autosave files after successful save
-    clearAutosaveFiles(filePath);
-
-    m_currentProjectPath = filePath;
+    // Only update state for real saves, not autosaves
+    if (!filePath.endsWith(".autosave")) {
+        clearAutosaveFiles(filePath);
+        m_currentProjectPath = filePath;
+    }
     return true;
 }
 

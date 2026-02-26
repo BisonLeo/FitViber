@@ -68,6 +68,10 @@ void PlaybackController::setStartTime(double startTime) {
     m_startTime = startTime;
 }
 
+void PlaybackController::syncTime(double seconds) {
+    m_currentTime = qBound(m_startTime, seconds, m_duration);
+}
+
 void PlaybackController::onTimer() {
     m_currentTime += 1.0 / m_fps;
     if (m_currentTime >= m_duration) {
