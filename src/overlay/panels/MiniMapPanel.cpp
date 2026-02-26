@@ -52,20 +52,23 @@ void MiniMapPanel::paint(QPainter& painter, const QRect& rect,
     QPainterPath completedPath;
     QPainterPath remainingPath;
 
-    bool completedStarted = false;
-    bool remainingStarted = false;
-    QPointF lastPoint;
+    bool needMoveCompleted = true;
+    bool needMoveRemaining = true;
+    QPointF lastCompletedPoint;
 
     for (const auto& r : session.records) {
         if (!r.hasGps) continue;
-        
+
         // Optimization: skip points outside the visual area (with a small margin)
-        if (std::abs(r.latitude - record.latitude) > halfLatRange * 2.0 || 
-            std::abs(r.longitude - record.longitude) > halfLonRange * 2.0) {
-            
-            // If we've started a path, we should still track the last point in case the next one jumps in
+        bool outOfBounds = std::abs(r.latitude - record.latitude) > halfLatRange * 2.0 ||
+                           std::abs(r.longitude - record.longitude) > halfLonRange * 2.0;
+
+        if (outOfBounds) {
+            // Next in-bounds point must start a new sub-path
+            needMoveCompleted = true;
+            needMoveRemaining = true;
             if (r.timestamp <= record.timestamp) {
-                lastPoint = toPoint(r.latitude, r.longitude);
+                lastCompletedPoint = toPoint(r.latitude, r.longitude);
             }
             continue;
         }
@@ -73,22 +76,23 @@ void MiniMapPanel::paint(QPainter& painter, const QRect& rect,
         QPointF p = toPoint(r.latitude, r.longitude);
 
         if (r.timestamp <= record.timestamp) {
-            if (!completedStarted) {
+            if (needMoveCompleted) {
                 completedPath.moveTo(p);
-                completedStarted = true;
+                needMoveCompleted = false;
             } else {
                 completedPath.lineTo(p);
             }
-            lastPoint = p;
+            lastCompletedPoint = p;
         } else {
-            if (!remainingStarted) {
-                if (completedStarted) {
-                    remainingPath.moveTo(lastPoint);
+            if (needMoveRemaining) {
+                // Connect from last completed point if this is the first remaining segment
+                if (!lastCompletedPoint.isNull() && remainingPath.isEmpty()) {
+                    remainingPath.moveTo(lastCompletedPoint);
                     remainingPath.lineTo(p);
                 } else {
                     remainingPath.moveTo(p);
                 }
-                remainingStarted = true;
+                needMoveRemaining = false;
             } else {
                 remainingPath.lineTo(p);
             }
