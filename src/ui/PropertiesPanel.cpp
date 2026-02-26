@@ -2,6 +2,9 @@
 #include "ClipTransform.h"
 #include <QPushButton>
 #include <QHBoxLayout>
+#include <QFormLayout>
+#include <QDateTime>
+#include <QTimeZone>
 
 PropertiesPanel::PropertiesPanel(QWidget* parent) : QWidget(parent) {
     auto* layout = new QVBoxLayout(this);
@@ -24,11 +27,67 @@ PropertiesPanel::PropertiesPanel(QWidget* parent) : QWidget(parent) {
     m_contentLayout->addWidget(m_clipInfoGroup);
     m_clipInfoGroup->setVisible(false);
 
+    // Clip placement group
+    m_placementGroup = new QGroupBox("Clip Placement", m_contentWidget);
+    auto* placementLayout = new QVBoxLayout(m_placementGroup);
+
+    auto* placementForm = new QFormLayout();
+
+    m_startSpin = new TimeSpinBox(m_placementGroup);
+    placementForm->addRow("Start:", m_startSpin);
+
+    m_endSpin = new TimeSpinBox(m_placementGroup);
+    placementForm->addRow("End:", m_endSpin);
+
+    m_durationSpin = new TimeSpinBox(m_placementGroup);
+    m_durationSpin->setRange(0.0, 1e9);
+    m_durationSpin->setReadOnly(true);
+    m_durationSpin->setButtonSymbols(QAbstractSpinBox::NoButtons);
+    m_durationSpin->setFocusPolicy(Qt::NoFocus);
+    placementForm->addRow("Duration:", m_durationSpin);
+
+    placementLayout->addLayout(placementForm);
+
+    // Time format toggle — default unchecked = HH:MM:SS.sss (absolute clock time)
+    m_timeFormatCheck = new QCheckBox("Show seconds", m_placementGroup);
+    m_timeFormatCheck->setChecked(false);
+    placementLayout->addWidget(m_timeFormatCheck);
+
+    connect(m_timeFormatCheck, &QCheckBox::toggled, this, [this](bool showSeconds) {
+        bool hms = !showSeconds;
+        m_startSpin->setTimeMode(hms);
+        m_endSpin->setTimeMode(hms);
+        m_durationSpin->setTimeMode(hms);
+    });
+
+    m_contentLayout->addWidget(m_placementGroup);
+    m_placementGroup->setVisible(false);
+
+    // When user edits Start: move clip, keep duration, update end
+    connect(m_startSpin, QOverload<double>::of(&QDoubleSpinBox::valueChanged), this, [this](double val) {
+        if (m_placementUpdating) return;
+        m_placementUpdating = true;
+        double dur = m_durationSpin->value();
+        m_endSpin->setValue(val + dur);
+        m_placementUpdating = false;
+        emit placementChanged(val, dur);
+    });
+
+    // When user edits End: keep duration, adjust start (shift the clip)
+    connect(m_endSpin, QOverload<double>::of(&QDoubleSpinBox::valueChanged), this, [this](double val) {
+        if (m_placementUpdating) return;
+        m_placementUpdating = true;
+        double dur = m_durationSpin->value();
+        double newStart = val - dur;
+        m_startSpin->setValue(newStart);
+        m_placementUpdating = false;
+        emit placementChanged(newStart, dur);
+    });
+
     // Transform controls group
     m_transformGroup = new QGroupBox("Transform", m_contentWidget);
     auto* tLayout = new QVBoxLayout(m_transformGroup);
 
-    // Flip buttons row
     auto* flipRow = new QHBoxLayout();
     auto* flipHBtn = new QPushButton("Flip H", m_transformGroup);
     auto* flipVBtn = new QPushButton("Flip V", m_transformGroup);
@@ -36,7 +95,6 @@ PropertiesPanel::PropertiesPanel(QWidget* parent) : QWidget(parent) {
     flipRow->addWidget(flipVBtn);
     tLayout->addLayout(flipRow);
 
-    // Rotate buttons row
     auto* rotRow = new QHBoxLayout();
     auto* rotCWBtn = new QPushButton("Rot CW 90", m_transformGroup);
     auto* rotCCWBtn = new QPushButton("Rot CCW 90", m_transformGroup);
@@ -44,11 +102,9 @@ PropertiesPanel::PropertiesPanel(QWidget* parent) : QWidget(parent) {
     rotRow->addWidget(rotCWBtn);
     tLayout->addLayout(rotRow);
 
-    // Reset button
     auto* resetBtn = new QPushButton("Reset Transform", m_transformGroup);
     tLayout->addWidget(resetBtn);
 
-    // Read-only labels
     m_scaleLabel = new QLabel("Scale: 1.00", m_transformGroup);
     m_rotationLabel = new QLabel("Rotation: 0.0", m_transformGroup);
     m_panLabel = new QLabel("Pan: 0, 0", m_transformGroup);
@@ -59,7 +115,6 @@ PropertiesPanel::PropertiesPanel(QWidget* parent) : QWidget(parent) {
     m_contentLayout->addWidget(m_transformGroup);
     m_transformGroup->setVisible(false);
 
-    // Button connections
     connect(flipHBtn, &QPushButton::clicked, this, [this]() {
         if (!m_transform) return;
         m_transform->flipH = !m_transform->flipH;
@@ -103,7 +158,6 @@ PropertiesPanel::PropertiesPanel(QWidget* parent) : QWidget(parent) {
 PropertiesPanel::~PropertiesPanel() = default;
 
 void PropertiesPanel::setPanelConfigs(const std::vector<PanelConfig>& configs) {
-    // TODO: Phase 9 - build UI for each panel config
     Q_UNUSED(configs);
 }
 
@@ -166,10 +220,41 @@ void PropertiesPanel::setClipInfo(const ClipInfo& info) {
             text += QString("<b>Distance:</b> %1 m<br>").arg(static_cast<int>(info.totalDistance));
     }
 
+    if (info.detectedStartTimestamp > 0) {
+        QDateTime startDt = QDateTime::fromSecsSinceEpoch(
+            static_cast<qint64>(info.detectedStartTimestamp), QTimeZone(8 * 3600));
+        text += QString("<b>Detected Start:</b> %1<br>").arg(startDt.toString("yyyy-MM-dd HH:mm:ss"));
+
+        if (info.detectedEndTimestamp > info.detectedStartTimestamp) {
+            QDateTime endDt = QDateTime::fromSecsSinceEpoch(
+                static_cast<qint64>(info.detectedEndTimestamp), QTimeZone(8 * 3600));
+            text += QString("<b>Detected End:</b> %1<br>").arg(endDt.toString("yyyy-MM-dd HH:mm:ss"));
+        }
+    }
+
     m_clipInfoLabel->setText(text);
 }
 
 void PropertiesPanel::clearClipInfo() {
     m_clipInfoGroup->setVisible(false);
     m_clipInfoLabel->clear();
+}
+
+void PropertiesPanel::setClipPlacement(const ClipPlacement& placement) {
+    m_placementGroup->setVisible(true);
+    m_placementUpdating = true;
+
+    // Set timeOrigin on start/end for absolute clock time display.
+    // Duration always shows relative (no timeOrigin offset).
+    m_startSpin->setTimeOrigin(placement.timeOrigin);
+    m_endSpin->setTimeOrigin(placement.timeOrigin);
+
+    m_startSpin->setValue(placement.startPos);
+    m_durationSpin->setValue(placement.duration);
+    m_endSpin->setValue(placement.endPos);
+    m_placementUpdating = false;
+}
+
+void PropertiesPanel::clearClipPlacement() {
+    m_placementGroup->setVisible(false);
 }

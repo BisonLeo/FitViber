@@ -153,7 +153,7 @@ void MainWindow::setupDockWidgets() {
     m_propertiesDock = new QDockWidget("Properties", this);
     m_propertiesDock->setWidget(m_propertiesPanel);
     m_propertiesDock->setObjectName("PropertiesDock");
-    m_propertiesPanel->setMinimumWidth(220);
+    m_propertiesPanel->setMinimumWidth(240);
     addDockWidget(Qt::RightDockWidgetArea, m_propertiesDock);
 
     m_timelineDock = new QDockWidget("Timeline", this);
@@ -264,6 +264,19 @@ void MainWindow::connectSignals() {
             m_previewWidget->setDuration(dur);
         }
 
+        // Update placement spinboxes if this is the selected clip
+        if (trackIndex == m_selectedTrackIndex && clipIndex == m_selectedClipIndex) {
+            if (track && clipIndex < track->clipCount()) {
+                const Clip& clip = track->clips()[clipIndex];
+                ClipPlacement placement;
+                placement.startPos = clip.timelineOffset;
+                placement.duration = clip.duration();
+                placement.endPos = clip.timelineOffset + clip.duration();
+                placement.timeOrigin = m_timelineWidget->model()->timeOrigin();
+                m_propertiesPanel->setClipPlacement(placement);
+            }
+        }
+
         if (m_playbackFromTimeline && m_playbackController->state() != PlaybackState::Playing) {
             onPlaybackTick(m_timelineWidget->model()->playheadPosition());
         }
@@ -272,6 +285,33 @@ void MainWindow::connectSignals() {
     // Clip selection → transform handles
     connect(m_timelineWidget, &TimelineWidget::clipSelectionChanged,
             this, &MainWindow::onClipSelectionChanged);
+
+    // Placement edited in properties panel → update clip and timeline
+    connect(m_propertiesPanel, &PropertiesPanel::placementChanged, this, [this](double newStart, double /*newDuration*/) {
+        if (m_selectedTrackIndex < 0 || m_selectedClipIndex < 0) return;
+        auto* track = m_timelineWidget->model()->track(m_selectedTrackIndex);
+        if (!track || m_selectedClipIndex >= track->clipCount()) return;
+
+        Clip& clip = track->clips()[m_selectedClipIndex];
+        clip.timelineOffset = newStart;
+
+        m_projectModified = true;
+        m_timelineWidget->update();
+
+        // Update playback bounds
+        double dur = m_timelineWidget->model()->duration();
+        double minT = m_timelineWidget->model()->minTime();
+        if (dur > minT) {
+            m_playbackController->setStartTime(minT);
+            m_playbackController->setDuration(dur);
+            m_previewWidget->setStartTime(minT);
+            m_previewWidget->setDuration(dur);
+        }
+
+        if (m_playbackFromTimeline && m_playbackController->state() != PlaybackState::Playing) {
+            onPlaybackTick(m_timelineWidget->model()->playheadPosition());
+        }
+    });
 
     // Preview transform changed → re-render + update properties labels
     connect(m_previewWidget, &PreviewWidget::transformChanged, this, [this]() {
@@ -715,11 +755,15 @@ void MainWindow::onFitFileOpened(const QString& path) {
 }
 
 void MainWindow::onClipSelectionChanged(int trackIndex, int clipIndex) {
+    m_selectedTrackIndex = trackIndex;
+    m_selectedClipIndex = clipIndex;
+
     if (trackIndex < 0 || clipIndex < 0) {
         m_previewWidget->setClipTransform(nullptr);
         m_previewWidget->setHandlesVisible(false);
         m_propertiesPanel->setClipTransform(nullptr);
         m_propertiesPanel->clearClipInfo();
+        m_propertiesPanel->clearClipPlacement();
         statusBar()->clearMessage();
         return;
     }
@@ -730,6 +774,7 @@ void MainWindow::onClipSelectionChanged(int trackIndex, int clipIndex) {
         m_previewWidget->setHandlesVisible(false);
         m_propertiesPanel->setClipTransform(nullptr);
         m_propertiesPanel->clearClipInfo();
+        m_propertiesPanel->clearClipPlacement();
         statusBar()->clearMessage();
         return;
     }
@@ -748,6 +793,7 @@ void MainWindow::onClipSelectionChanged(int trackIndex, int clipIndex) {
     // Populate clip info
     ClipInfo info;
     info.path = clip.sourcePath;
+    info.detectedStartTimestamp = clip.absoluteStartTime;
 
     if (clip.type == ClipType::Video || clip.type == ClipType::Image) {
         info.type = (clip.type == ClipType::Video) ? "Video" : "Image";
@@ -762,6 +808,8 @@ void MainWindow::onClipSelectionChanged(int trackIndex, int clipIndex) {
             if (mi.videoFps > 0 && mi.duration > 0)
                 info.totalFrames = static_cast<int>(mi.videoFps * mi.duration);
         }
+        if (clip.absoluteStartTime > 0 && info.totalSeconds > 0)
+            info.detectedEndTimestamp = clip.absoluteStartTime + info.totalSeconds;
         statusBar()->showMessage(QString("%1: %2x%3, %4 fps, %5s")
             .arg(clip.displayName).arg(info.width).arg(info.height)
             .arg(info.fps, 0, 'f', 1).arg(info.totalSeconds, 0, 'f', 1));
@@ -779,6 +827,8 @@ void MainWindow::onClipSelectionChanged(int trackIndex, int clipIndex) {
                     QTimeZone(8 * 3600));
                 info.firstTimestamp = dt.toString("yyyy-MM-dd HH:mm:ss");
             }
+            if (clip.absoluteStartTime > 0 && info.totalSeconds > 0)
+                info.detectedEndTimestamp = clip.absoluteStartTime + info.totalSeconds;
         }
         double distKm = info.totalDistance / 1000.0;
         statusBar()->showMessage(QString("%1: %2 records, %3 km, %4s")
@@ -787,6 +837,14 @@ void MainWindow::onClipSelectionChanged(int trackIndex, int clipIndex) {
     }
 
     m_propertiesPanel->setClipInfo(info);
+
+    // Populate placement
+    ClipPlacement placement;
+    placement.startPos = clip.timelineOffset;
+    placement.duration = clip.duration();
+    placement.endPos = clip.timelineOffset + clip.duration();
+    placement.timeOrigin = m_timelineWidget->model()->timeOrigin();
+    m_propertiesPanel->setClipPlacement(placement);
 }
 
 QImage MainWindow::applyTransform(const QImage& source, const ClipTransform& transform) {

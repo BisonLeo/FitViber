@@ -78,6 +78,8 @@ private:
     double m_lastSourceTime = -1.0; // previous tick's source time
 
     QSize m_canvasSize{1920, 1080}; // output canvas dimensions
+    int m_selectedTrackIndex = -1;
+    int m_selectedClipIndex = -1;
     
     // Project management
     std::unique_ptr<ProjectManager> m_projectManager;
